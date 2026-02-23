@@ -1,0 +1,66 @@
+# ===== 백업/임시 파일 =====
+*.bak
+*.bak.*
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# ===== Visual Studio =====
+.vs/
+bin/
+obj/
+Debug/
+Release/
+x64/
+x86/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.ncb
+*.opensdf
+*.sdf
+*.cachefile
+*.VC.db
+*.VC.opendb
+
+# ===== 빌드 결과물 =====
+[Bb]uild/
+[Oo]utput/
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.cache
+*.resources
+
+# ===== NuGet =====
+packages/
+*.nupkg
+project.lock.json
+
+# ===== 로그/데이터 =====
+*.log
+*.log.*
+logs/
+
+# ===== OS 파일 =====
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# ===== 설정/민감정보 =====
+*.config.local
+appsettings.*.json
+!appsettings.json
+secrets.json
+
+# ② .gitignore에 __pycache__ 추가 (빠져있었으므로)
+*.pyc
+*.pyo
+*.pyc.*
