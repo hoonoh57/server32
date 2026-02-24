@@ -356,6 +356,61 @@ Public Class Cybos
         Return result
     End Function
 
+    ''' <summary>
+    ''' 시간대별 프로그램매매 — 동기 버전 (UI 스레드에서 호출용)
+    ''' 연속 조회 없이 첫 페이지만 반환 (당일 시간대 데이터 충분)
+    ''' </summary>
+    Public Function DownloadProgramTradeByTimeSync(stockCode As String,
+                                                    Optional exchange As String = "A") As List(Of ProgramTradeByTime)
+        Dim result As New List(Of ProgramTradeByTime)
+        Dim code As String = EnsurePrefix(stockCode)
+        Dim exChar As Char = If(String.IsNullOrEmpty(exchange), "A"c, exchange(0))
+
+        Dim cpObj As New DSCBO1Lib.CpSvrNew8119()
+        cpObj.SetInputValue(0, code)
+        cpObj.SetInputValue(1, AscW(exChar))
+
+        Dim loopCount As Integer = 0
+        Do
+            Dim ret = cpObj.BlockRequest()
+            If ret <> 0 Then Exit Do
+
+            Dim rowCount As Short = cpObj.GetHeaderValue(0)
+            If rowCount = 0 Then Exit Do
+
+            For i As Integer = 0 To rowCount - 1
+                Dim item As New ProgramTradeByTime With {
+                    .Time = CULng(cpObj.GetDataValue(0, i)),
+                    .Price = CULng(cpObj.GetDataValue(1, i)),
+                    .SignChar = CStr(cpObj.GetDataValue(2, i)),
+                    .Change = CLng(cpObj.GetDataValue(3, i)),
+                    .ChangeRate = CSng(cpObj.GetDataValue(4, i)),
+                    .Volume = CULng(cpObj.GetDataValue(5, i)),
+                    .PgmBuyQty = CULng(cpObj.GetDataValue(6, i)),
+                    .PgmSellQty = CULng(cpObj.GetDataValue(7, i)),
+                    .PgmNetQty = CLng(cpObj.GetDataValue(8, i)),
+                    .PgmNetQtyChange = CLng(cpObj.GetDataValue(9, i)),
+                    .PgmBuyAmt = CULng(cpObj.GetDataValue(10, i)),
+                    .PgmSellAmt = CULng(cpObj.GetDataValue(11, i)),
+                    .PgmNetAmt = CLng(cpObj.GetDataValue(12, i)),
+                    .PgmNetAmtChange = CLng(cpObj.GetDataValue(13, i))
+                }
+                result.Add(item)
+            Next
+
+            If cpObj.Continue <> 1 Then Exit Do
+            loopCount += 1
+            Threading.Thread.Sleep(200)
+            If loopCount > 500 Then Exit Do
+        Loop
+
+        Debug.Print($"프로그램매매(시간별/동기) {code}: {loopCount + 1}회, {result.Count}건")
+        Return result
+    End Function
+
+
+
+
     ' ============================================================
     '  3) 실시간 프로그램매매 구독 (CpSysDib.CpSvr8119SCnld)
     ' ============================================================

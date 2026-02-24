@@ -1,4 +1,4 @@
-Imports System.IO
+ÔªøImports System.IO
 Imports System.Text
 Imports System.Threading.Tasks
 Imports Newtonsoft.Json
@@ -15,7 +15,7 @@ Public Class WebApiServer
     Private _baseUrl As String = "http://localhost:8082"
     Private Const DefaultRealtimeFids As String = "10;11;12;13;15;16;17;18;20;41;42;43;44;45;51;52;53;54;55;61;62;63;64;65;71;72;73;74;75;121;125;228"
 
-    ' ¶°¶° ¡æ∏Ò∏Ì°Íƒ⁄µÂ ∫Ø»ØøÎ CpStockCode ¶°¶°
+    ' ‚îÄ‚îÄ Ï¢ÖÎ™©Î™Ö‚ÜîÏΩîÎìú Î≥ÄÌôòÏö© CpStockCode ‚îÄ‚îÄ
     Private ReadOnly _stockCode As New CPUTILLib.CpStockCode
 
     Public Sub New(apiSvc As KiwoomApiService, rtSvc As RealtimeDataService, execHub As ExecutionHub, logger As SimpleLogger)
@@ -26,12 +26,12 @@ Public Class WebApiServer
     End Sub
 
     ''' <summary>
-    ''' ¡æ∏Ò∏Ì °Ê ¡æ∏Òƒ⁄µÂ (A¡¢µŒªÁ ¡¶∞≈, ∏¯√£¿∏∏È ∫ÛπÆ¿⁄ø≠)
+    ''' Ï¢ÖÎ™©Î™Ö ‚Üí Ï¢ÖÎ™©ÏΩîÎìú (AÏ†ëÎëêÏÇ¨ Ï†úÍ±∞, Î™ªÏ∞æÏúºÎ©¥ ÎπàÎ¨∏ÏûêÏó¥)
     ''' </summary>
     Public Function GetStockCode(stockName As String) As String
         Dim code As String = _stockCode.NameToCode(stockName)
         If code <> "" Then
-            Return code.Substring(1)   ' "A106450" °Ê "106450"
+            Return code.Substring(1)   ' "A106450" ‚Üí "106450"
         End If
         Return ""
     End Function
@@ -65,82 +65,133 @@ Public Class WebApiServer
         _logger.Info($"[API] {req.HttpMethod} {path}")
 
         ' CORS
-        res.Headers.Add("Access-Control-Allow-Origin", "*")
-        res.Headers.Add("Access-Control-Allow-Headers", "content-type")
-        res.Headers.Add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        Try
+            res.Headers.Add("Access-Control-Allow-Origin", "*")
+            res.Headers.Add("Access-Control-Allow-Headers", "content-type")
+            res.Headers.Add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        Catch ex As ObjectDisposedException
+            Return
+        End Try
 
         If req.HttpMethod = "OPTIONS" Then
-            res.StatusCode = 204 : res.Close() : Return
+            Try : res.StatusCode = 204 : res.Close() : Catch : End Try
+            Return
         End If
 
+        ' Help HTML (Î≥ÑÎèÑ Ï≤òÎ¶¨)
         If req.HttpMethod = "GET" AndAlso (path = "/help" OrElse path = "/help/realtime") Then
-            Dim wsBase = $"ws://localhost:{New Uri(_baseUrl).Port}"
-            Dim html = ApiHelpDocs.BuildHelpHtml(_baseUrl, wsBase, DefaultRealtimeFids)
-            WriteRawResponse(res, "text/html; charset=utf-8", Encoding.UTF8.GetBytes(html), 200)
+            Try
+                Dim wsBase = $"ws://localhost:{New Uri(_baseUrl).Port}"
+                Dim html = ApiHelpDocs.BuildHelpHtml(_baseUrl, wsBase, DefaultRealtimeFids)
+                WriteRawResponse(res, "text/html; charset=utf-8", Encoding.UTF8.GetBytes(html), 200)
+            Catch ex As ObjectDisposedException
+                _logger.Warn("[HTTP] Help page: client disconnected")
+            End Try
             Return
         End If
 
         Dim resp As ApiResponse = Nothing
+
         Try
             If req.HttpMethod = "GET" Then
+
                 Select Case path
+
                     Case "/api/help"
                         Dim wsBase = $"ws://localhost:{New Uri(_baseUrl).Port}"
                         resp = ApiResponse.Ok(ApiHelpDocs.BuildApiHelp(_baseUrl, wsBase, DefaultRealtimeFids))
-                    Case "/api/auth/login"
-                        resp = Resolve(_apiService.LoginAsync())
-                    Case "/api/status"
+
+                    Case "/api/auth/login", "/api/system/login"
+                        resp = Await _apiService.LoginAsync()
+
+                    Case "/api/status", "/api/system/status"
                         resp = ApiResponse.Ok(_apiService.GetStatus())
+
                     Case "/api/conditions"
-                        resp = Resolve(_apiService.LoadConditionsAsync())
+                        resp = Await _apiService.LoadConditionsAsync()
+
                     Case "/api/conditions/search"
                         Dim nm = req.QueryString("name")
                         Dim ix = Integer.Parse(If(req.QueryString("index"), "0"))
-                        resp = Resolve(_apiService.SearchConditionAsync(nm, ix))
+                        resp = Await _apiService.SearchConditionAsync(nm, ix)
+
                     Case "/api/conditions/start"
                         Dim nm = req.QueryString("name")
                         Dim ix = Integer.Parse(If(req.QueryString("index"), "0"))
                         Dim scr = If(req.QueryString("screen"), "9001")
-                        resp = Resolve(_apiService.StartConditionStreamAsync(nm, ix, scr))
+                        resp = Await _apiService.StartConditionStreamAsync(nm, ix, scr)
+
                     Case "/api/conditions/stop"
                         Dim nm = req.QueryString("name")
                         Dim ix = Integer.Parse(If(req.QueryString("index"), "0"))
                         Dim scr = If(req.QueryString("screen"), "9001")
                         resp = _apiService.StopConditionStream(nm, ix, scr)
+
                     Case "/api/dashboard"
                         resp = _apiService.GetDashboardSnapshot()
+
                     Case "/api/dashboard/refresh"
-                        resp = Resolve(_apiService.RefreshDashboardDataAsync())
-                    Case "/api/system/status"
-                        Dim stat = _apiService.GetStatus()
-                        resp = ApiResponse.Ok(stat)
-                    Case "/api/system/login"
-                        resp = Resolve(_apiService.LoginAsync())
+                        resp = Await _apiService.RefreshDashboardDataAsync()
+
                     Case "/api/accounts/balance"
                         Dim acc = req.QueryString("accountNo")
                         Dim pw = req.QueryString("pass")
-                        resp = Resolve(_apiService.GetAccountBalanceAsync(acc, pw))
+                        resp = Await _apiService.GetAccountBalanceAsync(acc, pw)
+
+                    Case "/api/accounts/deposit"
+                        Dim acc = req.QueryString("accountNo")
+                        Dim pw = req.QueryString("pass")
+                        resp = Await _apiService.GetDepositInfoAsync(acc, pw)
+
+                    Case "/api/accounts/orders"
+                        Dim acc = req.QueryString("accountNo")
+                        Dim code = req.QueryString("code")
+                        resp = Await _apiService.GetOutstandingOrdersAsync(acc, code)
+
                     Case "/api/market/candles/daily"
                         Dim code = req.QueryString("code")
                         Dim dt = req.QueryString("date")
                         If String.IsNullOrEmpty(dt) Then dt = DateTime.Now.ToString("yyyyMMdd")
                         Dim stopDate = req.QueryString("stopDate")
                         If String.IsNullOrEmpty(stopDate) Then stopDate = "20200101"
-                        resp = Resolve(_apiService.GetDailyCandlesAsync(code, dt, stopDate))
+                        resp = Await _apiService.GetDailyCandlesAsync(code, dt, stopDate)
+
                     Case "/api/market/candles/minute"
                         Dim code = req.QueryString("code")
                         Dim tick = If(req.QueryString("tick"), "1")
                         Dim stopTime = req.QueryString("stopTime")
                         If String.IsNullOrEmpty(stopTime) Then stopTime = DateTime.Now.AddDays(-1).ToString("yyyyMMdd") & "090000"
-                        resp = Resolve(_apiService.GetMinuteCandlesAsync(code, CInt(tick), stopTime))
+                        resp = Await _apiService.GetMinuteCandlesAsync(code, CInt(tick), stopTime)
+
                     Case "/api/market/candles/tick"
                         Dim code = req.QueryString("code")
                         Dim tick = If(req.QueryString("tick"), "1")
                         Dim stopTime = req.QueryString("stopTime")
                         If String.IsNullOrEmpty(stopTime) Then stopTime = DateTime.Now.AddDays(-1).ToString("yyyyMMdd") & "090000"
-                        resp = Resolve(_apiService.GetTickCandlesAsync(code, CInt(tick), stopTime))
+                        resp = Await _apiService.GetTickCandlesAsync(code, CInt(tick), stopTime)
 
-                        '////////////////program request////////////////////////////////////////////////////////////
+                    Case "/api/market/symbol"
+                        Dim code = req.QueryString("code")
+                        Dim name = _apiService.GetMasterName(code)
+                        Dim last = _apiService.GetMasterLastPrice(code)
+                        Dim state = _apiService.GetMasterState(code)
+                        resp = ApiResponse.Ok(New With {.code = code, .name = name, .last_price = last, .state = state})
+
+                    Case "/api/market/name_to_code"
+                        Dim stockName As String = req.QueryString("name")
+                        If String.IsNullOrEmpty(stockName) Then
+                            resp = ApiResponse.Err("name ÌååÎùºÎØ∏ÌÑ∞ ÌïÑÏöî")
+                        Else
+                            Dim code As String = GetStockCode(stockName.Trim())
+                            If code <> "" Then
+                                resp = ApiResponse.Ok(New With {.code = code, .name = stockName.Trim()})
+                            Else
+                                resp = ApiResponse.Err($"'{stockName}' Ï¢ÖÎ™©ÏΩîÎìú ÎØ∏Î∞úÍ≤¨")
+                            End If
+                        End If
+
+                        ' ‚îÄ‚îÄ ÌîÑÎ°úÍ∑∏Îû®Îß§Îß§ ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
+
                     Case "/api/market/program/time"
                         Dim code = req.QueryString("code")
                         Dim exchange = req.QueryString("exchange")
@@ -151,13 +202,23 @@ Public Class WebApiServer
                             resp = Await _apiService.GetProgramTradeByTimeAsync(code, exchange)
                         End If
 
+                    Case "/api/market/program/daily"
+                        Dim code = req.QueryString("code")
+                        Dim period = req.QueryString("period")
+                        If String.IsNullOrEmpty(period) Then period = "2"
+                        If String.IsNullOrEmpty(code) Then
+                            resp = ApiResponse.Err("code required", 400)
+                        Else
+                            resp = Await _apiService.GetProgramTradeByDayAsync(code, period)
+                        End If
+
                     Case "/api/market/program/subscribe"
                         Dim codesRaw = req.QueryString("codes")
                         If String.IsNullOrEmpty(codesRaw) Then
                             resp = ApiResponse.Err("codes required", 400)
                         Else
                             Dim codes = codesRaw.Split({";"c, ","c}, StringSplitOptions.RemoveEmptyEntries)
-                            resp = _apiService.SubscribeProgramTrade(codes)
+                            resp = Await _apiService.SubscribeProgramTradeAsync(codes)
                         End If
 
                     Case "/api/market/program/unsubscribe"
@@ -168,53 +229,9 @@ Public Class WebApiServer
                         Else
                             codes = codesRaw.Split({";"c, ","c}, StringSplitOptions.RemoveEmptyEntries)
                         End If
-                        resp = _apiService.UnsubscribeProgramTrade(codes)
+                        resp = Await _apiService.UnsubscribeProgramTradeAsync(codes)
 
-                    Case "/api/market/program/daily"
-                        Dim code = req.QueryString("code")
-                        Dim period = req.QueryString("period")
-                        If String.IsNullOrEmpty(period) Then period = "2"
-                        If String.IsNullOrEmpty(code) Then
-                            resp = ApiResponse.Err("code required", 400)
-                        Else
-                            resp = _apiService.GetProgramTradeByDay(code, period)
-                        End If
-                        '////////////////program request////////////////////////////////////////////////////////////
-
-                    Case "/api/accounts/deposit"
-                        Dim acc = req.QueryString("accountNo")
-                        Dim pw = req.QueryString("pass")
-                        resp = Resolve(_apiService.GetDepositInfoAsync(acc, pw))
-                    Case "/api/accounts/orders"
-                        Dim acc = req.QueryString("accountNo")
-                        Dim code = req.QueryString("code")
-                        resp = Resolve(_apiService.GetOutstandingOrdersAsync(acc, code))
-                    Case "/api/market/symbol"
-                        Dim code = req.QueryString("code")
-                        Dim name = _apiService.GetMasterName(code)
-                        Dim last = _apiService.GetMasterLastPrice(code)
-                        Dim state = _apiService.GetMasterState(code)
-                        resp = ApiResponse.Ok(New With {.code = code, .name = name, .last_price = last, .state = state})
-
-                    ' ¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°
-                    ' °⁄ √ﬂ∞°: ¥‹¿œ ¡æ∏Ò∏Ì °Ê ƒ⁄µÂ (GET)
-                    ' GET /api/market/name_to_code?name=SK«œ¿Ã¥–Ω∫
-                    ' ¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°
-                    Case "/api/market/name_to_code"
-                        Dim stockName As String = req.QueryString("name")
-                        If String.IsNullOrEmpty(stockName) Then
-                            resp = ApiResponse.Err("name ∆ƒ∂ÛπÃ≈Õ « ø‰")
-                        Else
-                            Dim code As String = GetStockCode(stockName.Trim())
-                            If code <> "" Then
-                                resp = ApiResponse.Ok(New With {
-                                    .code = code,
-                                    .name = stockName.Trim()
-                                })
-                            Else
-                                resp = ApiResponse.Err($"'{stockName}' ¡æ∏Òƒ⁄µÂ πÃπﬂ∞ﬂ")
-                            End If
-                        End If
+                        ' ‚îÄ‚îÄ Ïã§ÏãúÍ∞Ñ (Kiwoom) ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
 
                     Case "/api/realtime/subscribe"
                         Dim codes = req.QueryString("codes")
@@ -226,46 +243,41 @@ Public Class WebApiServer
                             _realtimeService.Subscribe(screen, codes, fids, "0")
                             resp = ApiResponse.Ok(Nothing, $"Subscribed: {codes}")
                         End If
+
                     Case "/api/realtime/unsubscribe"
                         Dim code = If(req.QueryString("code"), "ALL")
                         Dim screen = If(req.QueryString("screen"), "ALL")
                         _realtimeService.Unsubscribe(screen, code)
                         resp = ApiResponse.Ok(New With {.screen = screen, .code = code}, "Realtime unsubscribed")
+
                     Case Else
                         resp = ApiResponse.Err("Not Found", 404)
+
                 End Select
 
             ElseIf req.HttpMethod = "POST" Then
+
                 Using r As New StreamReader(CType(req.InputStream, Stream))
                     Dim body = r.ReadToEnd()
 
                     If path = "/api/orders" Then
                         Dim orq = JsonConvert.DeserializeObject(Of OrderRequest)(body)
-                        resp = Resolve(_apiService.SendOrderAsync(orq))
+                        resp = Await _apiService.SendOrderAsync(orq)
 
                     ElseIf path = "/api/auth/login" Then
-                        resp = Resolve(_apiService.LoginAsync())
+                        resp = Await _apiService.LoginAsync()
 
-                        ' ¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°
-                        ' °⁄ √ﬂ∞°: ∫πºˆ ¡æ∏Ò∏Ì °Ê ƒ⁄µÂ ¿œ∞˝∫Ø»Ø (POST)
-                        ' POST /api/market/names_to_codes
-                        ' Body: {"names": ["SK«œ¿Ã¥–Ω∫","ªÔº∫¿¸¿⁄","ƒ⁄æ∆Ω√æ∆ææø•"]}
-                        ' ¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°¶°
                     ElseIf path = "/api/market/names_to_codes" Then
                         Try
                             Dim jObj As JObject = JObject.Parse(body)
                             Dim namesArr As JArray = CType(jObj("names"), JArray)
-
                             Dim results As New List(Of Object)()
                             Dim found As Integer = 0
 
                             For Each nameToken As JToken In namesArr
                                 Dim sname As String = nameToken.ToString().Trim()
                                 Dim code As String = GetStockCode(sname)
-                                results.Add(New With {
-                                    .name = sname,
-                                    .code = code
-                                })
+                                results.Add(New With {.name = sname, .code = code})
                                 If code <> "" Then found += 1
                             Next
 
@@ -275,48 +287,50 @@ Public Class WebApiServer
                                 .found = found,
                                 .missing = namesArr.Count - found
                             })
-
                         Catch ex As Exception
-                            resp = ApiResponse.Err("JSON ∆ƒΩÃ ø¿∑˘: " & ex.Message)
+                            resp = ApiResponse.Err("JSON ÌååÏã± Ïò§Î•ò: " & ex.Message)
                         End Try
 
+                    Else
+                        resp = ApiResponse.Err("Not Found", 404)
                     End If
                 End Using
+
+            Else
+                resp = ApiResponse.Err("Method Not Allowed", 405)
             End If
+
         Catch ex As Exception
+            _logger.Errors($"[API] Error processing {path}: {ex.Message}")
             resp = ApiResponse.Err(ex.Message, 500)
         End Try
 
+        ' ‚îÄ‚îÄ ÏùëÎãµ Ï†ÑÏÜ° (ÌÅ¥ÎùºÏù¥Ïñ∏Ìä∏ Ïù¥ÌÉà Î∞©Ïñ¥) ‚îÄ‚îÄ
         If resp Is Nothing Then resp = ApiResponse.Err("Not Found", 404)
 
-        Dim json = JsonConvert.SerializeObject(resp)
-        Dim buf = Encoding.UTF8.GetBytes(json)
-        WriteRawResponse(res, "application/json", buf, resp.StatusCode)
-    End Sub
-
-    Private Shared Function Resolve(Of T)(tt As Task(Of T)) As T
-        Return tt.ConfigureAwait(False).GetAwaiter().GetResult()
-    End Function
-
-    Private Sub WriteRawResponse(res As HttpListenerResponse, contentType As String, buf As Byte(), statusCode As Integer)
-        res.ContentType = contentType
-        res.ContentEncoding = Encoding.UTF8
-        res.ContentLength64 = buf.LongLength
-        res.StatusCode = statusCode
-
         Try
-            res.OutputStream.Write(buf, 0, buf.Length)
-            res.OutputStream.Flush()
-        Catch ioEx As IOException
-            _logger.Warn("[HTTP] Client disconnected during response: " & ioEx.Message)
-        Catch sockEx As Net.Sockets.SocketException
-            _logger.Warn("[HTTP] Socket error while sending response: " & sockEx.Message)
-        Finally
-            Try
-                res.Close()
-            Catch
-            End Try
+            Dim json = JsonConvert.SerializeObject(resp)
+            Dim buf = Encoding.UTF8.GetBytes(json)
+            WriteRawResponse(res, "application/json; charset=utf-8", buf, resp.StatusCode)
+        Catch ex As ObjectDisposedException
+            _logger.Warn($"[HTTP] Client disconnected before response: {path}")
+        Catch ex As Exception
+            _logger.Warn($"[HTTP] Response send error ({path}): {ex.Message}")
         End Try
     End Sub
+
+    Private Sub WriteRawResponse(res As HttpListenerResponse, contentType As String, buf As Byte(), statusCode As Integer)
+        If res Is Nothing Then Return
+        Try
+            res.StatusCode = statusCode
+            res.ContentType = contentType
+            res.ContentLength64 = buf.Length
+            res.OutputStream.Write(buf, 0, buf.Length)
+            res.OutputStream.Close()
+        Catch
+            ' ÌÅ¥ÎùºÏù¥Ïñ∏Ìä∏ Ïù¥ÌÉà, Ïù¥ÎØ∏ Ï†ÑÏÜ°Îê® Îì± Î™®Îì† Í≤ΩÏö∞ Î¨¥Ïãú
+        End Try
+    End Sub
+
 
 End Class

@@ -835,16 +835,25 @@ Public Class KiwoomApiService
 
     '//////////////////프로그램 순매수 정보  신규삽입//////////////////////////////////////////////////////////
     ' ============================================================
-    '  프로그램매매 REST 핸들러
+    '  프로그램매매 REST 핸들러 (UI 스레드 마샬링 적용)
     ' ============================================================
 
-    ''' <summary>시간대별 프로그램매매 (당일 시간대 데이터)</summary>
+    ''' <summary>시간대별 프로그램매매</summary>
     Public Async Function GetProgramTradeByTimeAsync(code As String, Optional exchange As String = "A") As Task(Of ApiResponse)
         Try
-            Dim rows = Await _cybos.DownloadProgramTradeByTime(code, exchange)
+            ' Cybos COM은 STA 스레드에서만 호출 가능 → UI 스레드로 마샬링
+            Dim rows As List(Of Cybos.ProgramTradeByTime) = Nothing
+            Await UiInvokeAsync(Sub()
+                                    rows = _cybos.DownloadProgramTradeByTimeSync(code, exchange)
+                                End Sub)
+
+            ' ↑ 동기 버전이 필요하므로 Cybos에 동기 메서드 추가 필요
+            ' 또는 아래처럼 Task.Run 대신 UI Invoke 내에서 완료
+            If rows Is Nothing Then rows = New List(Of Cybos.ProgramTradeByTime)
+
             Dim result As New List(Of Dictionary(Of String, Object))
-            For Each r As Object In rows
-                Dim d As New Dictionary(Of String, Object) From {
+            For Each r As Cybos.ProgramTradeByTime In rows
+                result.Add(New Dictionary(Of String, Object) From {
                     {"시간", r.Time},
                     {"현재가", r.Price},
                     {"대비부호", r.SignChar},
@@ -859,8 +868,7 @@ Public Class KiwoomApiService
                     {"프로그램매도금액_천원", r.PgmSellAmt},
                     {"프로그램순매수금액_천원", r.PgmNetAmt},
                     {"프로그램순매수금액증감_천원", r.PgmNetAmtChange}
-                }
-                result.Add(d)
+                })
             Next
             Return ApiResponse.Ok(result, $"시간대별 {rows.Count}건")
         Catch ex As Exception
@@ -869,13 +877,18 @@ Public Class KiwoomApiService
         End Try
     End Function
 
-    ''' <summary>일자별 프로그램매매 (최대 6개월)</summary>
-    Public Function GetProgramTradeByDay(code As String, Optional period As String = "2") As ApiResponse
+    ''' <summary>일자별 프로그램매매</summary>
+    Public Async Function GetProgramTradeByDayAsync(code As String, Optional period As String = "2") As Task(Of ApiResponse)
         Try
-            Dim rows = _cybos.DownloadProgramTradeByDay(code, period)
+            Dim rows As List(Of Cybos.ProgramTradeByDay) = Nothing
+            Await UiInvokeAsync(Sub()
+                                    rows = _cybos.DownloadProgramTradeByDay(code, period)
+                                End Sub)
+            If rows Is Nothing Then rows = New List(Of Cybos.ProgramTradeByDay)
+
             Dim result As New List(Of Dictionary(Of String, Object))
-            For Each r As Object In rows
-                Dim d As New Dictionary(Of String, Object) From {
+            For Each r As Cybos.ProgramTradeByDay In rows
+                result.Add(New Dictionary(Of String, Object) From {
                     {"일자", r.TradeDate},
                     {"현재가", r.Price},
                     {"전일대비", r.Change},
@@ -889,8 +902,7 @@ Public Class KiwoomApiService
                     {"매수금액_만원", r.BuyAmt},
                     {"순매수증감금액_만원", r.NetAmtChange},
                     {"순매수누적금액_만원", r.NetAmtCumul}
-                }
-                result.Add(d)
+                })
             Next
             Return ApiResponse.Ok(result, $"일자별 {rows.Count}건")
         Catch ex As Exception
@@ -899,33 +911,37 @@ Public Class KiwoomApiService
         End Try
     End Function
 
-    ''' <summary>실시간 프로그램매매 구독 시작</summary>
-    Public Function SubscribeProgramTrade(codes As String()) As ApiResponse
+    ''' <summary>실시간 프로그램매매 구독</summary>
+    Public Async Function SubscribeProgramTradeAsync(codes As String()) As Task(Of ApiResponse)
         Try
-            For Each c As String In codes
-                If Not String.IsNullOrWhiteSpace(c) Then
-                    _cybos.SubscribeProgramTrade(c.Trim())
-                End If
-            Next
+            Await UiInvokeAsync(Sub()
+                                    For Each c As String In codes
+                                        If Not String.IsNullOrWhiteSpace(c) Then
+                                            _cybos.SubscribeProgramTrade(c.Trim())
+                                        End If
+                                    Next
+                                End Sub)
             Return ApiResponse.Ok(Nothing, $"프로그램매매 실시간 구독: {String.Join(",", codes)}")
         Catch ex As Exception
             Return ApiResponse.Err(ex.Message, 500)
         End Try
     End Function
 
-    ''' <summary>실시간 프로그램매매 구독 해지</summary>
-    Public Function UnsubscribeProgramTrade(codes As String()) As ApiResponse
+    ''' <summary>실시간 프로그램매매 해지</summary>
+    Public Async Function UnsubscribeProgramTradeAsync(codes As String()) As Task(Of ApiResponse)
         Try
-            If codes Is Nothing OrElse codes.Length = 0 OrElse
-               (codes.Length = 1 AndAlso codes(0).ToUpper() = "ALL") Then
-                _cybos.UnsubscribeAllProgramTrade()
-                Return ApiResponse.Ok(Nothing, "프로그램매매 전체 구독 해지")
-            End If
-            For Each c As String In codes
-                If Not String.IsNullOrWhiteSpace(c) Then
-                    _cybos.UnsubscribeProgramTrade(c.Trim())
-                End If
-            Next
+            Await UiInvokeAsync(Sub()
+                                    If codes Is Nothing OrElse codes.Length = 0 OrElse
+                                       (codes.Length = 1 AndAlso codes(0).ToUpper() = "ALL") Then
+                                        _cybos.UnsubscribeAllProgramTrade()
+                                    Else
+                                        For Each c As String In codes
+                                            If Not String.IsNullOrWhiteSpace(c) Then
+                                                _cybos.UnsubscribeProgramTrade(c.Trim())
+                                            End If
+                                        Next
+                                    End If
+                                End Sub)
             Return ApiResponse.Ok(Nothing, $"프로그램매매 구독 해지: {String.Join(",", codes)}")
         Catch ex As Exception
             Return ApiResponse.Err(ex.Message, 500)

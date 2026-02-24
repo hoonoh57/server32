@@ -301,30 +301,32 @@ Public Class RealtimeDataService
     ''' </summary>
     Public Sub BroadcastJson(jsonStr As String)
         If String.IsNullOrEmpty(jsonStr) Then Return
+        If _sessions.IsEmpty Then Return
+
         For Each entry As KeyValuePair(Of String, RealtimeWebSocketBehavior) In _sessions.ToArray()
             Dim sessionId = entry.Key
             Dim sess = entry.Value
-            Dim ws As WebSocket = Nothing
-            If sess IsNot Nothing AndAlso sess.Context IsNot Nothing Then
-                ws = sess.Context.WebSocket
-            End If
-            If ws Is Nothing Then
-                RemoveSession(sessionId)
-                Continue For
-            End If
-            If ws.ReadyState <> WebSocketState.Open Then
-                RemoveSession(sessionId)
-                Continue For
-            End If
             Try
+                If sess Is Nothing OrElse sess.Context Is Nothing Then
+                    RemoveSession(sessionId)
+                    Continue For
+                End If
+                Dim ws = sess.Context.WebSocket
+                If ws Is Nothing OrElse ws.ReadyState <> WebSocketState.Open Then
+                    RemoveSession(sessionId)
+                    Continue For
+                End If
                 ws.Send(jsonStr)
+            Catch ex As ObjectDisposedException
+                RemoveSession(sessionId)
             Catch ex As Exception
                 If _logger IsNot Nothing Then
-                    _logger.Warn($"[RT] Send failed ({sessionId}): {ex.Message}")
+                    _logger.Warn($"[RT-PGM] Send failed ({sessionId}): {ex.Message}")
                 End If
                 RemoveSession(sessionId)
             End Try
         Next
     End Sub
+
 
 End Class
