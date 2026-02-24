@@ -1,8 +1,10 @@
 Imports System.Runtime.InteropServices
-Imports CPSYSDIBLib
+'Imports CPSYSDIBLib
 Imports CPUTILLib
 Imports DSCBO1Lib
 Imports System.Diagnostics
+Imports CPSYSDIBLib
+'Imports CPSYSDIBLib.CpSvr8119SCnld
 
 Public Class Cybos
     ' ⚠️ COM 객체는 멤버 변수로 두지 않고, 각 함수에서 매번 새로 생성 : test
@@ -198,6 +200,229 @@ Public Class Cybos
             Return DateTime.MinValue
         End Try
     End Function
+
+    '/////////////////////////////////
+    ' 프로그램 매매정보 요청
+    '////////////////////////////////
+    ' ============================================================
+    '  프로그램매매 데이터 모델
+    ' ============================================================
+
+    Public Class ProgramTradeByTime
+        Public Property Time As ULong
+        Public Property Price As ULong
+        Public Property SignChar As String
+        Public Property Change As Long
+        Public Property ChangeRate As Single
+        Public Property Volume As ULong
+        Public Property PgmBuyQty As ULong
+        Public Property PgmSellQty As ULong
+        Public Property PgmNetQty As Long
+        Public Property PgmNetQtyChange As Long
+        Public Property PgmBuyAmt As ULong
+        Public Property PgmSellAmt As ULong
+        Public Property PgmNetAmt As Long
+        Public Property PgmNetAmtChange As Long
+    End Class
+
+    Public Class ProgramTradeByDay
+        Public Property TradeDate As Long
+        Public Property Price As Long
+        Public Property Change As Long
+        Public Property ChangeRate As Double
+        Public Property Volume As Long
+        Public Property SellQty As Long
+        Public Property BuyQty As Long
+        Public Property NetQtyChange As Long
+        Public Property NetQtyCumul As Long
+        Public Property SellAmt As Long
+        Public Property BuyAmt As Long
+        Public Property NetAmtChange As Long
+        Public Property NetAmtCumul As Long
+    End Class
+
+    Public Class ProgramTradeRealtime
+        Public Property StockCode As String
+        Public Property Time As ULong
+        Public Property Price As ULong
+        Public Property SignChar As String
+        Public Property Change As Long
+        Public Property ChangeRate As Single
+        Public Property Volume As ULong
+        Public Property PgmBuyQty As ULong
+        Public Property PgmSellQty As ULong
+        Public Property PgmNetQty As Long
+        Public Property PgmBuyAmt As ULong
+        Public Property PgmSellAmt As ULong
+        Public Property PgmNetAmt As Long
+    End Class
+
+    ' ============================================================
+    '  1) 시간대별 프로그램매매 추이 (DsCbo1.CpSvrNew8119, 연속 O)
+    ' ============================================================
+    Public Async Function DownloadProgramTradeByTime(stockCode As String,
+                                                      Optional exchange As String = "A") As Task(Of List(Of ProgramTradeByTime))
+        Dim result As New List(Of ProgramTradeByTime)
+        Dim code As String = EnsurePrefix(stockCode)
+        Dim exChar As Char = If(String.IsNullOrEmpty(exchange), "A"c, exchange(0))
+        Dim loopCount As Integer = 0
+
+        Dim cpObj As New DSCBO1Lib.CpSvrNew8119()
+        cpObj.SetInputValue(0, code)
+        cpObj.SetInputValue(1, AscW(exChar))
+
+        Do
+            Dim ret = cpObj.BlockRequest()
+            If ret <> 0 Then
+                Debug.Print($"CpSvrNew8119 BlockRequest 오류: {ret}")
+                Exit Do
+            End If
+
+            Dim rowCount As Short = cpObj.GetHeaderValue(0)
+            If rowCount = 0 Then Exit Do
+
+            For i As Integer = 0 To rowCount - 1
+                Dim item As New ProgramTradeByTime With {
+                    .Time = CULng(cpObj.GetDataValue(0, i)),
+                    .Price = CULng(cpObj.GetDataValue(1, i)),
+                    .SignChar = CStr(cpObj.GetDataValue(2, i)),
+                    .Change = CLng(cpObj.GetDataValue(3, i)),
+                    .ChangeRate = CSng(cpObj.GetDataValue(4, i)),
+                    .Volume = CULng(cpObj.GetDataValue(5, i)),
+                    .PgmBuyQty = CULng(cpObj.GetDataValue(6, i)),
+                    .PgmSellQty = CULng(cpObj.GetDataValue(7, i)),
+                    .PgmNetQty = CLng(cpObj.GetDataValue(8, i)),
+                    .PgmNetQtyChange = CLng(cpObj.GetDataValue(9, i)),
+                    .PgmBuyAmt = CULng(cpObj.GetDataValue(10, i)),
+                    .PgmSellAmt = CULng(cpObj.GetDataValue(11, i)),
+                    .PgmNetAmt = CLng(cpObj.GetDataValue(12, i)),
+                    .PgmNetAmtChange = CLng(cpObj.GetDataValue(13, i))
+                }
+                result.Add(item)
+            Next
+
+            If cpObj.Continue <> 1 Then Exit Do
+            loopCount += 1
+            Await Task.Delay(200)
+            If loopCount > 500 Then Exit Do
+        Loop
+
+        Debug.Print($"프로그램매매(시간별) {code}: {loopCount + 1}회 요청, {result.Count}건 수신")
+        Return result
+    End Function
+
+    ' ============================================================
+    '  2) 일자별 프로그램매매 추이 (DsCbo1.CpSvrNew8119Day, 연속 X)
+    ' ============================================================
+    Public Function DownloadProgramTradeByDay(stockCode As String,
+                                               Optional periodType As String = "2") As List(Of ProgramTradeByDay)
+        Dim result As New List(Of ProgramTradeByDay)
+        Dim code As String = EnsurePrefix(stockCode)
+        Dim pChar As Char = If(String.IsNullOrEmpty(periodType), "2"c, periodType(0))
+
+        Dim cpObj As New DSCBO1Lib.CpSvrNew8119Day()
+        cpObj.SetInputValue(0, AscW(pChar))
+        cpObj.SetInputValue(1, code)
+
+        Dim ret = cpObj.BlockRequest()
+        If ret <> 0 Then
+            Debug.Print($"CpSvrNew8119Day BlockRequest 오류: {ret}")
+            Return result
+        End If
+
+        Dim rowCount As Short = cpObj.GetHeaderValue(0)
+        If rowCount = 0 Then Return result
+
+        For i As Integer = 0 To rowCount - 1
+            Dim item As New ProgramTradeByDay With {
+                .TradeDate = CLng(cpObj.GetDataValue(0, i)),
+                .Price = CLng(cpObj.GetDataValue(1, i)),
+                .Change = CLng(cpObj.GetDataValue(2, i)),
+                .ChangeRate = CDbl(cpObj.GetDataValue(3, i)),
+                .Volume = CLng(cpObj.GetDataValue(4, i)),
+                .SellQty = CLng(cpObj.GetDataValue(5, i)),
+                .BuyQty = CLng(cpObj.GetDataValue(6, i)),
+                .NetQtyChange = CLng(cpObj.GetDataValue(7, i)),
+                .NetQtyCumul = CLng(cpObj.GetDataValue(8, i)),
+                .SellAmt = CLng(cpObj.GetDataValue(9, i)),
+                .BuyAmt = CLng(cpObj.GetDataValue(10, i)),
+                .NetAmtChange = CLng(cpObj.GetDataValue(11, i)),
+                .NetAmtCumul = CLng(cpObj.GetDataValue(12, i))
+            }
+            result.Add(item)
+        Next
+
+        Debug.Print($"프로그램매매(일별) {code}: {result.Count}건 (기간: {pChar})")
+        Return result
+    End Function
+
+    ' ============================================================
+    '  3) 실시간 프로그램매매 구독 (CpSysDib.CpSvr8119SCnld)
+    ' ============================================================
+    'Private _pgmRtSubscriptions As New Dictionary(Of String, CPSYSDIBLib.CpSvr8119SCnld)
+    Private _pgmRtSubscriptions As New Dictionary(Of String, CPSYSDIBLib.CpSvr8119SCnld)
+    'CPSYSDIBLib.CpSvr8119SCnld
+    Public Event ProgramTradeReceived(data As ProgramTradeRealtime)
+
+    Public Sub SubscribeProgramTrade(stockCode As String)
+        Dim code As String = EnsurePrefix(stockCode)
+        If _pgmRtSubscriptions.ContainsKey(code) Then Return
+
+        Dim cpObj As New CPSYSDIBLib.CpSvr8119SCnld()
+        cpObj.SetInputValue(0, code)
+
+        AddHandler cpObj.Received, Sub()
+                                       Try
+                                           Dim item As New ProgramTradeRealtime With {
+                                               .StockCode = CStr(cpObj.GetHeaderValue(0)),
+                                               .Time = CULng(cpObj.GetHeaderValue(1)),
+                                               .Price = CULng(cpObj.GetHeaderValue(2)),
+                                               .SignChar = CStr(cpObj.GetHeaderValue(3)),
+                                               .Change = CLng(cpObj.GetHeaderValue(4)),
+                                               .ChangeRate = CSng(cpObj.GetHeaderValue(5)),
+                                               .Volume = CULng(cpObj.GetHeaderValue(6)),
+                                               .PgmBuyQty = CULng(cpObj.GetHeaderValue(7)),
+                                               .PgmSellQty = CULng(cpObj.GetHeaderValue(8)),
+                                               .PgmNetQty = CLng(cpObj.GetHeaderValue(9)),
+                                               .PgmBuyAmt = CULng(cpObj.GetHeaderValue(10)),
+                                               .PgmSellAmt = CULng(cpObj.GetHeaderValue(11)),
+                                               .PgmNetAmt = CLng(cpObj.GetHeaderValue(12))
+                                           }
+                                           RaiseEvent ProgramTradeReceived(item)
+                                       Catch ex As Exception
+                                           Debug.Print($"프로그램매매 실시간 파싱 오류 ({code}): {ex.Message}")
+                                       End Try
+                                   End Sub
+
+        cpObj.Subscribe()
+        _pgmRtSubscriptions(code) = cpObj
+        Debug.Print($"프로그램매매 실시간 구독: {code}")
+    End Sub
+
+    Public Sub UnsubscribeProgramTrade(stockCode As String)
+        Dim code As String = EnsurePrefix(stockCode)
+        If _pgmRtSubscriptions.ContainsKey(code) Then
+            Try : _pgmRtSubscriptions(code).Unsubscribe() : Catch : End Try
+            _pgmRtSubscriptions.Remove(code)
+        End If
+    End Sub
+
+    Public Sub UnsubscribeAllProgramTrade()
+        For Each kvp As Object In _pgmRtSubscriptions
+            Try : kvp.Value.Unsubscribe() : Catch : End Try
+        Next
+        _pgmRtSubscriptions.Clear()
+    End Sub
+
+    ' 공통 헬퍼: 종목코드에 A 접두사 보장
+    Private Function EnsurePrefix(stockCode As String) As String
+        If String.IsNullOrEmpty(stockCode) Then Return "A000000"
+        If stockCode.StartsWith("A") OrElse stockCode.StartsWith("U") OrElse stockCode.StartsWith("J") Then
+            Return stockCode
+        End If
+        Return "A" & stockCode
+    End Function
+
 End Class
 
 Public Class Candle
@@ -208,3 +433,4 @@ Public Class Candle
     Public Property Close As Double
     Public Property Volume As Double
 End Class
+

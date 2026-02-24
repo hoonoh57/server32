@@ -22,7 +22,11 @@ Public Module ApiHelpDocs
             New Dictionary(Of String, Object) From {{"method", "GET"}, {"path", "/api/market/symbol?code={code}"}, {"purpose", "Symbol master info"}},
             New Dictionary(Of String, Object) From {{"method", "GET"}, {"path", "/api/realtime/subscribe?codes={005930;000660}&screen=1000&fids=" & defaultRealtimeFids}, {"purpose", "Realtime subscribe"}},
             New Dictionary(Of String, Object) From {{"method", "GET"}, {"path", "/api/realtime/unsubscribe?screen=1000&code=ALL"}, {"purpose", "Realtime unsubscribe"}},
-            New Dictionary(Of String, Object) From {{"method", "POST"}, {"path", "/api/orders"}, {"purpose", "Place order"}}
+            New Dictionary(Of String, Object) From {{"method", "POST"}, {"path", "/api/orders"}, {"purpose", "Place order"}},
+                        New Dictionary(Of String, Object) From {{"method", "GET"}, {"path", "/api/market/program/time?code={code}&exchange=A"}, {"purpose", "Program trade by time (intraday)"}},
+            New Dictionary(Of String, Object) From {{"method", "GET"}, {"path", "/api/market/program/daily?code={code}&period=2"}, {"purpose", "Program trade by day (up to 6 months)"}},
+            New Dictionary(Of String, Object) From {{"method", "GET"}, {"path", "/api/market/program/subscribe?codes={005930;000660}"}, {"purpose", "Program trade realtime subscribe"}},
+            New Dictionary(Of String, Object) From {{"method", "GET"}, {"path", "/api/market/program/unsubscribe?codes=ALL"}, {"purpose", "Program trade realtime unsubscribe"}}
         }
 
         Return New Dictionary(Of String, Object) From {
@@ -98,6 +102,15 @@ Public Module ApiHelpDocs
         sb.AppendLine("<tr><td>GET</td><td>/api/market/symbol?code={code}</td><td><button onclick=""runSymbol()"">Run</button></td></tr>")
         sb.AppendLine("<tr><td>GET</td><td>/api/realtime/subscribe?codes={005930;000660}&amp;screen=1000</td><td><button onclick=""runSub()"">Run</button></td></tr>")
         sb.AppendLine("<tr><td>GET</td><td>/api/realtime/unsubscribe?screen=1000&amp;code=ALL</td><td><button onclick=""runUnsub()"">Run</button></td></tr>")
+
+        '///////////////////////////////////////// program /////////////////////////////////////
+        sb.AppendLine("<tr><td>GET</td><td>/api/market/program/time?code={code}&amp;exchange=A</td><td><button onclick=""runPgmTime()"">Run</button></td></tr>")
+        sb.AppendLine("<tr><td>GET</td><td>/api/market/program/daily?code={code}&amp;period=2</td><td><button onclick=""runPgmDaily()"">Run</button></td></tr>")
+        sb.AppendLine("<tr><td>GET</td><td>/api/market/program/subscribe?codes={codes}</td><td><button onclick=""runPgmSub()"">Run</button></td></tr>")
+        sb.AppendLine("<tr><td>GET</td><td>/api/market/program/unsubscribe?codes=ALL</td><td><button onclick=""runPgmUnsub()"">Run</button></td></tr>")
+        '///////////////////////////////////////// program /////////////////////////////////////
+
+
         sb.AppendLine("<tr><td>POST</td><td>/api/orders</td><td><button onclick=""runOrder()"">Run</button></td></tr>")
         sb.AppendLine("</table></div>")
 
@@ -152,6 +165,15 @@ Public Module ApiHelpDocs
         sb.AppendLine("function runSub(){ return q('/api/realtime/subscribe?codes='+encodeURIComponent(v('codes'))+'&screen='+encodeURIComponent(v('screen'))+'&fids='+encodeURIComponent(v('fids'))); }")
         sb.AppendLine("function runUnsub(){ return q('/api/realtime/unsubscribe?screen='+encodeURIComponent(v('screen'))+'&code=ALL'); }")
         sb.AppendLine("async function runOrder(){ let body=JSON.parse(v('orderBody')); if(!body.AccountNo || body.AccountNo==='1234567890'){ body.AccountNo=v('accountNo'); } return callJson('/api/orders','POST',body); }")
+
+        '/////////////////////program////////////////////////////
+        sb.AppendLine("function runPgmTime(){ return q('/api/market/program/time?code='+encodeURIComponent(v('code'))+'&exchange=A'); }")
+        sb.AppendLine("function runPgmDaily(){ return q('/api/market/program/daily?code='+encodeURIComponent(v('code'))+'&period=2'); }")
+        sb.AppendLine("function runPgmSub(){ return q('/api/market/program/subscribe?codes='+encodeURIComponent(v('codes'))); }")
+        sb.AppendLine("function runPgmUnsub(){ return q('/api/market/program/unsubscribe?codes=ALL'); }")
+        '/////////////////////program////////////////////////////
+
+
         sb.AppendLine("function summarizeRows(label, rows){")
         sb.AppendLine("  const arr = Array.isArray(rows)?rows:[];")
         sb.AppendLine("  const count = arr.length;")

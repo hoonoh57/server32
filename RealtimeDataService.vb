@@ -295,4 +295,36 @@ Public Class RealtimeDataService
             End Try
         Next
     End Sub
+    ''' <summary>
+    ''' 외부에서 JSON 문자열을 직접 브로드캐스트할 수 있는 Public 메서드
+    ''' (프로그램매매 실시간 등 Cybos 이벤트 중계용)
+    ''' </summary>
+    Public Sub BroadcastJson(jsonStr As String)
+        If String.IsNullOrEmpty(jsonStr) Then Return
+        For Each entry As KeyValuePair(Of String, RealtimeWebSocketBehavior) In _sessions.ToArray()
+            Dim sessionId = entry.Key
+            Dim sess = entry.Value
+            Dim ws As WebSocket = Nothing
+            If sess IsNot Nothing AndAlso sess.Context IsNot Nothing Then
+                ws = sess.Context.WebSocket
+            End If
+            If ws Is Nothing Then
+                RemoveSession(sessionId)
+                Continue For
+            End If
+            If ws.ReadyState <> WebSocketState.Open Then
+                RemoveSession(sessionId)
+                Continue For
+            End If
+            Try
+                ws.Send(jsonStr)
+            Catch ex As Exception
+                If _logger IsNot Nothing Then
+                    _logger.Warn($"[RT] Send failed ({sessionId}): {ex.Message}")
+                End If
+                RemoveSession(sessionId)
+            End Try
+        Next
+    End Sub
+
 End Class

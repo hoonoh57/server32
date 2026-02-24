@@ -57,7 +57,7 @@ Public Class WebApiServer
         End Try
     End Sub
 
-    Private Sub ProcessApiRequest(sender As Object, e As HttpRequestEventArgs)
+    Private Async Sub ProcessApiRequest(sender As Object, e As HttpRequestEventArgs)
         Dim req = e.Request
         Dim res = e.Response
         Dim path = req.Url.AbsolutePath.ToLower()
@@ -139,6 +139,48 @@ Public Class WebApiServer
                         Dim stopTime = req.QueryString("stopTime")
                         If String.IsNullOrEmpty(stopTime) Then stopTime = DateTime.Now.AddDays(-1).ToString("yyyyMMdd") & "090000"
                         resp = Resolve(_apiService.GetTickCandlesAsync(code, CInt(tick), stopTime))
+
+                        '////////////////program request////////////////////////////////////////////////////////////
+                    Case "/api/market/program/time"
+                        Dim code = req.QueryString("code")
+                        Dim exchange = req.QueryString("exchange")
+                        If String.IsNullOrEmpty(exchange) Then exchange = "A"
+                        If String.IsNullOrEmpty(code) Then
+                            resp = ApiResponse.Err("code required", 400)
+                        Else
+                            resp = Await _apiService.GetProgramTradeByTimeAsync(code, exchange)
+                        End If
+
+                    Case "/api/market/program/subscribe"
+                        Dim codesRaw = req.QueryString("codes")
+                        If String.IsNullOrEmpty(codesRaw) Then
+                            resp = ApiResponse.Err("codes required", 400)
+                        Else
+                            Dim codes = codesRaw.Split({";"c, ","c}, StringSplitOptions.RemoveEmptyEntries)
+                            resp = _apiService.SubscribeProgramTrade(codes)
+                        End If
+
+                    Case "/api/market/program/unsubscribe"
+                        Dim codesRaw = req.QueryString("codes")
+                        Dim codes As String()
+                        If String.IsNullOrEmpty(codesRaw) Then
+                            codes = New String() {"ALL"}
+                        Else
+                            codes = codesRaw.Split({";"c, ","c}, StringSplitOptions.RemoveEmptyEntries)
+                        End If
+                        resp = _apiService.UnsubscribeProgramTrade(codes)
+
+                    Case "/api/market/program/daily"
+                        Dim code = req.QueryString("code")
+                        Dim period = req.QueryString("period")
+                        If String.IsNullOrEmpty(period) Then period = "2"
+                        If String.IsNullOrEmpty(code) Then
+                            resp = ApiResponse.Err("code required", 400)
+                        Else
+                            resp = _apiService.GetProgramTradeByDay(code, period)
+                        End If
+                        '////////////////program request////////////////////////////////////////////////////////////
+
                     Case "/api/accounts/deposit"
                         Dim acc = req.QueryString("accountNo")
                         Dim pw = req.QueryString("pass")
@@ -276,4 +318,5 @@ Public Class WebApiServer
             End Try
         End Try
     End Sub
+
 End Class

@@ -8,6 +8,7 @@ Imports System.ComponentModel
 Imports AxKHOpenAPILib
 Imports System.Globalization
 Imports System.Configuration
+Imports System.Diagnostics
 
 Public Class KiwoomApiService
     Private ReadOnly _api As AxKHOpenAPILib.AxKHOpenAPI
@@ -45,6 +46,41 @@ Public Class KiwoomApiService
         AddHandler _api.OnReceiveConditionVer, AddressOf OnReceiveConditionVer
         AddHandler _api.OnReceiveTrCondition, AddressOf OnReceiveTrCondition
     End Sub
+
+    '////program realtime
+    ' KiwoomApiService 생성자 또는 별도 초기화 메서드에 추가
+    Public Sub InitProgramTradeRealtimeBroadcast(realtimeHub As RealtimeDataService)
+        AddHandler _cybos.ProgramTradeReceived, Sub(data As Cybos.ProgramTradeRealtime)
+                                                    Try
+                                                        Dim payload = New With {
+                    .type = "program_trade",
+                    .code = If(data.StockCode, "").Replace("A", ""),
+                    .timestamp = DateTime.Now.ToString("yyyyMMddHHmmss"),
+                    .data = New With {
+                        .time = data.Time,
+                        .price = data.Price,
+                        .sign = data.SignChar,
+                        .change = data.Change,
+                        .change_rate = data.ChangeRate,
+                        .volume = data.Volume,
+                        .pgm_buy_qty = data.PgmBuyQty,
+                        .pgm_sell_qty = data.PgmSellQty,
+                        .pgm_net_qty = data.PgmNetQty,
+                        .pgm_buy_amt = data.PgmBuyAmt,
+                        .pgm_sell_amt = data.PgmSellAmt,
+                        .pgm_net_amt = data.PgmNetAmt
+                    }
+                }
+                                                        Dim json = Newtonsoft.Json.JsonConvert.SerializeObject(payload)
+                                                        realtimeHub.BroadcastJson(json)
+                                                    Catch ex As Exception
+                                                        Debug.Print($"프로그램매매 실시간 브로드캐스트 오류: {ex.Message}")
+                                                    End Try
+                                                End Sub
+    End Sub
+
+
+
 
     ' -------- UI Thread helpers (Based on Reference Code) --------
     Private Function UiInvokeAsync(action As Action) As Task
@@ -796,6 +832,107 @@ Public Class KiwoomApiService
         If Not _isLoggedIn Then Return ""
         Return UiInvoke(Function() _api.GetMasterStockState(code))
     End Function
+
+    '//////////////////프로그램 순매수 정보  신규삽입//////////////////////////////////////////////////////////
+    ' ============================================================
+    '  프로그램매매 REST 핸들러
+    ' ============================================================
+
+    ''' <summary>시간대별 프로그램매매 (당일 시간대 데이터)</summary>
+    Public Async Function GetProgramTradeByTimeAsync(code As String, Optional exchange As String = "A") As Task(Of ApiResponse)
+        Try
+            Dim rows = Await _cybos.DownloadProgramTradeByTime(code, exchange)
+            Dim result As New List(Of Dictionary(Of String, Object))
+            For Each r As Object In rows
+                Dim d As New Dictionary(Of String, Object) From {
+                    {"시간", r.Time},
+                    {"현재가", r.Price},
+                    {"대비부호", r.SignChar},
+                    {"전일대비", r.Change},
+                    {"대비율", r.ChangeRate},
+                    {"거래량", r.Volume},
+                    {"프로그램매수수량", r.PgmBuyQty},
+                    {"프로그램매도수량", r.PgmSellQty},
+                    {"프로그램순매수수량", r.PgmNetQty},
+                    {"프로그램순매수수량증감", r.PgmNetQtyChange},
+                    {"프로그램매수금액_천원", r.PgmBuyAmt},
+                    {"프로그램매도금액_천원", r.PgmSellAmt},
+                    {"프로그램순매수금액_천원", r.PgmNetAmt},
+                    {"프로그램순매수금액증감_천원", r.PgmNetAmtChange}
+                }
+                result.Add(d)
+            Next
+            Return ApiResponse.Ok(result, $"시간대별 {rows.Count}건")
+        Catch ex As Exception
+            _logger.Errors($"[GetProgramTradeByTime] {ex.Message}")
+            Return ApiResponse.Err(ex.Message, 500)
+        End Try
+    End Function
+
+    ''' <summary>일자별 프로그램매매 (최대 6개월)</summary>
+    Public Function GetProgramTradeByDay(code As String, Optional period As String = "2") As ApiResponse
+        Try
+            Dim rows = _cybos.DownloadProgramTradeByDay(code, period)
+            Dim result As New List(Of Dictionary(Of String, Object))
+            For Each r As Object In rows
+                Dim d As New Dictionary(Of String, Object) From {
+                    {"일자", r.TradeDate},
+                    {"현재가", r.Price},
+                    {"전일대비", r.Change},
+                    {"대비율", r.ChangeRate},
+                    {"거래량", r.Volume},
+                    {"매도량", r.SellQty},
+                    {"매수량", r.BuyQty},
+                    {"순매수증감수량", r.NetQtyChange},
+                    {"순매수누적수량", r.NetQtyCumul},
+                    {"매도금액_만원", r.SellAmt},
+                    {"매수금액_만원", r.BuyAmt},
+                    {"순매수증감금액_만원", r.NetAmtChange},
+                    {"순매수누적금액_만원", r.NetAmtCumul}
+                }
+                result.Add(d)
+            Next
+            Return ApiResponse.Ok(result, $"일자별 {rows.Count}건")
+        Catch ex As Exception
+            _logger.Errors($"[GetProgramTradeByDay] {ex.Message}")
+            Return ApiResponse.Err(ex.Message, 500)
+        End Try
+    End Function
+
+    ''' <summary>실시간 프로그램매매 구독 시작</summary>
+    Public Function SubscribeProgramTrade(codes As String()) As ApiResponse
+        Try
+            For Each c As String In codes
+                If Not String.IsNullOrWhiteSpace(c) Then
+                    _cybos.SubscribeProgramTrade(c.Trim())
+                End If
+            Next
+            Return ApiResponse.Ok(Nothing, $"프로그램매매 실시간 구독: {String.Join(",", codes)}")
+        Catch ex As Exception
+            Return ApiResponse.Err(ex.Message, 500)
+        End Try
+    End Function
+
+    ''' <summary>실시간 프로그램매매 구독 해지</summary>
+    Public Function UnsubscribeProgramTrade(codes As String()) As ApiResponse
+        Try
+            If codes Is Nothing OrElse codes.Length = 0 OrElse
+               (codes.Length = 1 AndAlso codes(0).ToUpper() = "ALL") Then
+                _cybos.UnsubscribeAllProgramTrade()
+                Return ApiResponse.Ok(Nothing, "프로그램매매 전체 구독 해지")
+            End If
+            For Each c As String In codes
+                If Not String.IsNullOrWhiteSpace(c) Then
+                    _cybos.UnsubscribeProgramTrade(c.Trim())
+                End If
+            Next
+            Return ApiResponse.Ok(Nothing, $"프로그램매매 구독 해지: {String.Join(",", codes)}")
+        Catch ex As Exception
+            Return ApiResponse.Err(ex.Message, 500)
+        End Try
+    End Function
+    '///////////프로그램 순매수정보 삽입 완료/////////////////////////////
+
 
     ' ----- TR Event Handler (The Brain) -----
     Private Sub OnReceiveTrData(sender As Object, e As _DKHOpenAPIEvents_OnReceiveTrDataEvent)

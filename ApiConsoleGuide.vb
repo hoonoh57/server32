@@ -326,6 +326,50 @@ Public Module ApiConsoleGuide
                 .Sample = "{ Success:true, Message:'Realtime unsubscribed', Data:{ screen:'1000', code:'ALL' } }",
                 .Notes = "Use before reconnect / shutdown"
             },
+                        New EndpointDoc With {
+                .Key = "program_trade_time",
+                .HttpMethod = "GET",
+                .PathTemplate = "/api/market/program/time?code={code}&exchange=A",
+                .Purpose = "종목별 프로그램매매 추이 (시간대별, 당일)",
+                .RequiredParams = "code",
+                .OptionalParams = "exchange (A=전체, K=KRX, N=NXT, default=A)",
+                .DataContract = "Data = Array<{ 시간, 현재가, 대비부호, 전일대비, 대비율, 거래량, 프로그램매수수량, 프로그램매도수량, 프로그램순매수수량, 프로그램순매수수량증감, 프로그램매수금액_천원, 프로그램매도금액_천원, 프로그램순매수금액_천원, 프로그램순매수금액증감_천원 }>",
+                .Sample = "{ Success:true, Data:[{ 시간:1430, 현재가:70000, 프로그램순매수수량:12500, ... }] }",
+                .Notes = "연속 조회 지원. 금액 단위: 천원. CybosPlus CpSvrNew8119 기반."
+            },
+            New EndpointDoc With {
+                .Key = "program_trade_daily",
+                .HttpMethod = "GET",
+                .PathTemplate = "/api/market/program/daily?code={code}&period=2",
+                .Purpose = "종목별 프로그램매매 추이 (일자별)",
+                .RequiredParams = "code",
+                .OptionalParams = "period (0=최근5일, 1=한달, 2=3개월, 3=6개월, default=2)",
+                .DataContract = "Data = Array<{ 일자, 현재가, 전일대비, 대비율, 거래량, 매도량, 매수량, 순매수증감수량, 순매수누적수량, 매도금액_만원, 매수금액_만원, 순매수증감금액_만원, 순매수누적금액_만원 }>",
+                .Sample = "{ Success:true, Data:[{ 일자:20260223, 현재가:70000, 순매수누적수량:345000, ... }] }",
+                .Notes = "단건 조회. 금액 단위: 만원. CybosPlus CpSvrNew8119Day 기반."
+            },
+            New EndpointDoc With {
+                .Key = "program_trade_rt_subscribe",
+                .HttpMethod = "GET",
+                .PathTemplate = "/api/market/program/subscribe?codes={005930;000660}",
+                .Purpose = "프로그램매매 실시간 구독 시작",
+                .RequiredParams = "codes (;구분)",
+                .OptionalParams = "none",
+                .DataContract = "Data = null",
+                .Sample = "{ Success:true, Message:'프로그램매매 실시간 구독: 005930,000660' }",
+                .Notes = "실시간 데이터는 /ws/realtime 으로 type='program_trade'로 수신. CpSvr8119SCnld 기반."
+            },
+            New EndpointDoc With {
+                .Key = "program_trade_rt_unsubscribe",
+                .HttpMethod = "GET",
+                .PathTemplate = "/api/market/program/unsubscribe?codes=ALL",
+                .Purpose = "프로그램매매 실시간 구독 해지",
+                .RequiredParams = "none",
+                .OptionalParams = "codes (;구분, 생략 또는 ALL=전체해지)",
+                .DataContract = "Data = null",
+                .Sample = "{ Success:true, Message:'프로그램매매 전체 구독 해지' }",
+                .Notes = "종료 전 반드시 해지 권장."
+            },
             New EndpointDoc With {
                 .Key = "orders_post",
                 .HttpMethod = "POST",

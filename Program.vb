@@ -25,11 +25,15 @@ Public Module Program
             Dim rtSvc As New RealtimeDataService(form.ApiControl, logger)
             Dim exeHub As New ExecutionHub(form.ApiControl, logger, apiSvc)
             Dim web As New WebApiServer(apiSvc, rtSvc, exeHub, logger)
-            
+
+            ' ★ 프로그램매매 실시간 → WebSocket 중계 연결
+            apiSvc.InitProgramTradeRealtimeBroadcast(rtSvc)
+
             Dim portStr As String = System.Configuration.ConfigurationManager.AppSettings("Port")
             If String.IsNullOrEmpty(portStr) Then portStr = "8082"
-            
+
             Dim url As String = $"http://localhost:{portStr}"
+
             web.Start(url)
             IO.File.AppendAllText("DEBUG_BOOT.txt", "3. WebServer Started" & vbCrLf)
             
