@@ -1,4 +1,5 @@
-﻿Imports System.IO
+﻿Imports System.Diagnostics
+Imports System.IO
 Imports System.Text
 Imports System.Threading.Tasks
 Imports Newtonsoft.Json
@@ -16,7 +17,12 @@ Public Class WebApiServer
     Private Const DefaultRealtimeFids As String = "10;11;12;13;15;16;17;18;20;41;42;43;44;45;51;52;53;54;55;61;62;63;64;65;71;72;73;74;75;121;125;228"
 
     ' ── 종목명↔코드 변환용 CpStockCode ──
-    Private ReadOnly _stockCode As New CPUTILLib.CpStockCode
+    '///Private ReadOnly _stockCode As New CPUTILLib.CpStockCode
+    ' ── 종목명↔코드 변환용 CpStockCode: 서버 시작 시 생성 금지, 필요 시 lazy 생성 ──
+    Private _stockCode As CPUTILLib.CpStockCode = Nothing
+    Private ReadOnly _stockCodeLock As New Object()
+
+
 
     Public Sub New(apiSvc As KiwoomApiService, rtSvc As RealtimeDataService, execHub As ExecutionHub, logger As SimpleLogger)
         _apiService = apiSvc
@@ -25,16 +31,51 @@ Public Class WebApiServer
         _logger = logger
     End Sub
 
-    ''' <summary>
-    ''' 종목명 → 종목코드 (A접두사 제거, 못찾으면 빈문자열)
-    ''' </summary>
-    Public Function GetStockCode(stockName As String) As String
-        Dim code As String = _stockCode.NameToCode(stockName)
-        If code <> "" Then
-            Return code.Substring(1)   ' "A106450" → "106450"
-        End If
-        Return ""
+    Private Shared Function ParseIntQuery(req As HttpListenerRequest, key As String, defaultValue As Integer) As Integer
+        Dim raw As String = req.QueryString(key)
+        If String.IsNullOrWhiteSpace(raw) Then Return defaultValue
+        Dim parsed As Integer
+        If Integer.TryParse(raw, parsed) Then Return parsed
+        Return defaultValue
     End Function
+
+    '''' <summary>
+    '''' 종목명 → 종목코드 (A접두사 제거, 못찾으면 빈문자열)
+    '''' </summary>
+    'Public Function GetStockCode(stockName As String) As String
+    '    Dim code As String = _stockCode.NameToCode(stockName)
+    '    If code <> "" Then
+    '        Return code.Substring(1)   ' "A106450" → "106450"
+    '    End If
+    '    Return ""
+    'End Function
+
+    Public Function GetStockCode(stockName As String) As String
+        If String.IsNullOrWhiteSpace(stockName) Then Return ""
+
+        Try
+            SyncLock _stockCodeLock
+                If _stockCode Is Nothing Then
+                    _stockCode = New CPUTILLib.CpStockCode()
+                End If
+
+                Dim code As String = _stockCode.NameToCode(stockName.Trim())
+                If String.IsNullOrWhiteSpace(code) Then Return ""
+
+                If code.StartsWith("A", StringComparison.OrdinalIgnoreCase) AndAlso code.Length > 1 Then
+                    Return code.Substring(1)
+                End If
+
+                Return code
+            End SyncLock
+
+        Catch ex As Exception
+            Debug.Print("[GetStockCode] CpStockCode 실패: " & ex.Message)
+            Return ""
+        End Try
+    End Function
+
+
 
     Public Sub Start(url As String)
         Try
@@ -57,10 +98,10 @@ Public Class WebApiServer
         End Try
     End Sub
 
-    Private Async Sub ProcessApiRequest(sender As Object, e As HttpRequestEventArgs)
-        Dim req = e.Request
-        Dim res = e.Response
-        Dim path = req.Url.AbsolutePath.ToLower()
+    Private Sub ProcessApiRequest(sender As Object, e As HttpRequestEventArgs)
+        Dim req As HttpListenerRequest = e.Request
+        Dim res As HttpListenerResponse = e.Response
+        Dim path As String = req.Url.AbsolutePath.ToLower()
 
         _logger.Info($"[API] {req.HttpMethod} {path}")
 
@@ -102,51 +143,63 @@ Public Class WebApiServer
                         resp = ApiResponse.Ok(ApiHelpDocs.BuildApiHelp(_baseUrl, wsBase, DefaultRealtimeFids))
 
                     Case "/api/auth/login", "/api/system/login"
-                        resp = Await _apiService.LoginAsync()
+                        resp = Resolve(_apiService.LoginAsync())
 
                     Case "/api/status", "/api/system/status"
                         resp = ApiResponse.Ok(_apiService.GetStatus())
 
                     Case "/api/conditions"
-                        resp = Await _apiService.LoadConditionsAsync()
+                        resp = Resolve(_apiService.LoadConditionsAsync())
 
                     Case "/api/conditions/search"
-                        Dim nm = req.QueryString("name")
-                        Dim ix = Integer.Parse(If(req.QueryString("index"), "0"))
-                        resp = Await _apiService.SearchConditionAsync(nm, ix)
+                        Dim nm As String = req.QueryString("name")
+                        Dim ix As Integer = ParseIntQuery(req, "index", 0)
+                        If String.IsNullOrWhiteSpace(nm) Then
+                            resp = ApiResponse.Err("name is required", 400)
+                        Else
+                            resp = Resolve(_apiService.SearchConditionAsync(nm, ix))
+                        End If
 
                     Case "/api/conditions/start"
-                        Dim nm = req.QueryString("name")
-                        Dim ix = Integer.Parse(If(req.QueryString("index"), "0"))
-                        Dim scr = If(req.QueryString("screen"), "9001")
-                        resp = Await _apiService.StartConditionStreamAsync(nm, ix, scr)
+                        Dim nm As String = req.QueryString("name")
+                        Dim ix As Integer = ParseIntQuery(req, "index", 0)
+                        Dim scr As String = If(req.QueryString("screen"), "9001")
+                        If String.IsNullOrWhiteSpace(nm) Then
+                            resp = ApiResponse.Err("name is required", 400)
+                        Else
+                            resp = Resolve(_apiService.StartConditionStreamAsync(nm, ix, scr))
+                        End If
 
                     Case "/api/conditions/stop"
-                        Dim nm = req.QueryString("name")
-                        Dim ix = Integer.Parse(If(req.QueryString("index"), "0"))
-                        Dim scr = If(req.QueryString("screen"), "9001")
-                        resp = _apiService.StopConditionStream(nm, ix, scr)
+                        Dim nm As String = req.QueryString("name")
+                        Dim ix As Integer = ParseIntQuery(req, "index", 0)
+                        Dim scr As String = If(req.QueryString("screen"), "9001")
+                        If String.IsNullOrWhiteSpace(nm) Then
+                            resp = ApiResponse.Err("name is required", 400)
+                        Else
+                            resp = _apiService.StopConditionStream(nm, ix, scr)
+                        End If
 
                     Case "/api/dashboard"
                         resp = _apiService.GetDashboardSnapshot()
 
                     Case "/api/dashboard/refresh"
-                        resp = Await _apiService.RefreshDashboardDataAsync()
+                        resp = Resolve(_apiService.RefreshDashboardDataAsync())
 
                     Case "/api/accounts/balance"
                         Dim acc = req.QueryString("accountNo")
                         Dim pw = req.QueryString("pass")
-                        resp = Await _apiService.GetAccountBalanceAsync(acc, pw)
+                        resp = Resolve(_apiService.GetAccountBalanceAsync(acc, pw))
 
                     Case "/api/accounts/deposit"
                         Dim acc = req.QueryString("accountNo")
                         Dim pw = req.QueryString("pass")
-                        resp = Await _apiService.GetDepositInfoAsync(acc, pw)
+                        resp = Resolve(_apiService.GetDepositInfoAsync(acc, pw))
 
                     Case "/api/accounts/orders"
                         Dim acc = req.QueryString("accountNo")
                         Dim code = req.QueryString("code")
-                        resp = Await _apiService.GetOutstandingOrdersAsync(acc, code)
+                        resp = Resolve(_apiService.GetOutstandingOrdersAsync(acc, code))
 
                     Case "/api/market/candles/daily"
                         Dim code = req.QueryString("code")
@@ -154,21 +207,23 @@ Public Class WebApiServer
                         If String.IsNullOrEmpty(dt) Then dt = DateTime.Now.ToString("yyyyMMdd")
                         Dim stopDate = req.QueryString("stopDate")
                         If String.IsNullOrEmpty(stopDate) Then stopDate = "20200101"
-                        resp = Await _apiService.GetDailyCandlesAsync(code, dt, stopDate)
+                        resp = Resolve(_apiService.GetDailyCandlesAsync(code, dt, stopDate))
 
                     Case "/api/market/candles/minute"
                         Dim code = req.QueryString("code")
                         Dim tick = If(req.QueryString("tick"), "1")
                         Dim stopTime = req.QueryString("stopTime")
-                        If String.IsNullOrEmpty(stopTime) Then stopTime = DateTime.Now.AddDays(-1).ToString("yyyyMMdd") & "090000"
-                        resp = Await _apiService.GetMinuteCandlesAsync(code, CInt(tick), stopTime)
+                        If String.IsNullOrEmpty(stopTime) Then
+                            stopTime = Util.GetAdjustedPreviousDate & "140000" 'DateTime.Now.AddDays(-1).ToString("yyyyMMdd") & "090000"
+                        End If
+                        resp = Resolve(_apiService.GetMinuteCandlesAsync(code, CInt(tick), stopTime))
 
                     Case "/api/market/candles/tick"
                         Dim code = req.QueryString("code")
                         Dim tick = If(req.QueryString("tick"), "1")
                         Dim stopTime = req.QueryString("stopTime")
                         If String.IsNullOrEmpty(stopTime) Then stopTime = DateTime.Now.AddDays(-1).ToString("yyyyMMdd") & "090000"
-                        resp = Await _apiService.GetTickCandlesAsync(code, CInt(tick), stopTime)
+                        resp = Resolve(_apiService.GetTickCandlesAsync(code, CInt(tick), stopTime))
 
                     Case "/api/market/symbol"
                         Dim code = req.QueryString("code")
@@ -199,7 +254,7 @@ Public Class WebApiServer
                         If String.IsNullOrEmpty(code) Then
                             resp = ApiResponse.Err("code required", 400)
                         Else
-                            resp = Await _apiService.GetProgramTradeByTimeAsync(code, exchange)
+                            resp = Resolve(_apiService.GetProgramTradeByTimeAsync(code, exchange))
                         End If
 
                     Case "/api/market/program/daily"
@@ -209,7 +264,7 @@ Public Class WebApiServer
                         If String.IsNullOrEmpty(code) Then
                             resp = ApiResponse.Err("code required", 400)
                         Else
-                            resp = Await _apiService.GetProgramTradeByDayAsync(code, period)
+                            resp = Resolve(_apiService.GetProgramTradeByDayAsync(code, period))
                         End If
 
                     Case "/api/market/program/subscribe"
@@ -218,7 +273,7 @@ Public Class WebApiServer
                             resp = ApiResponse.Err("codes required", 400)
                         Else
                             Dim codes = codesRaw.Split({";"c, ","c}, StringSplitOptions.RemoveEmptyEntries)
-                            resp = Await _apiService.SubscribeProgramTradeAsync(codes)
+                            resp = Resolve(_apiService.SubscribeProgramTradeAsync(codes))
                         End If
 
                     Case "/api/market/program/unsubscribe"
@@ -229,9 +284,70 @@ Public Class WebApiServer
                         Else
                             codes = codesRaw.Split({";"c, ","c}, StringSplitOptions.RemoveEmptyEntries)
                         End If
-                        resp = Await _apiService.UnsubscribeProgramTradeAsync(codes)
-
+                        resp = Resolve(_apiService.UnsubscribeProgramTradeAsync(codes))
                         ' ── 실시간 (Kiwoom) ──────────────────────
+
+
+                        '$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+
+                       ' ── 대신증권 수급 분석 (MarketEye / StockMember / 투자자동향 / Keyframe) ──
+
+                    Case "/api/cybos/marketeye/supply"
+                        ' 최대 200종목 수급 일괄 조회
+                        ' 사용: GET /api/cybos/marketeye/supply?codes=005930;000660;035720
+                        Dim codesRaw2 = req.QueryString("codes")
+                        If String.IsNullOrEmpty(codesRaw2) Then
+                            resp = ApiResponse.Err("codes required (semicolon separated)", 400)
+                        Else
+                            Dim codeArr = codesRaw2.Split({";"c, ","c}, StringSplitOptions.RemoveEmptyEntries)
+                            resp = Resolve(_apiService.GetMarketEyeSupplyAsync(codeArr))
+                        End If
+
+                    Case "/api/cybos/member/top5"
+                        ' 단일 종목 5대 매매창구 조회
+                        ' 사용: GET /api/cybos/member/top5?code=005930
+                        Dim mCode = req.QueryString("code")
+                        If String.IsNullOrEmpty(mCode) Then
+                            resp = ApiResponse.Err("code required", 400)
+                        Else
+                            resp = Resolve(_apiService.GetStockMemberTop5Async(mCode.Trim()))
+                        End If
+
+                    Case "/api/cybos/member/batch"
+                        ' 복수 종목 5대 창구 일괄 조회
+                        ' 사용: GET /api/cybos/member/batch?codes=005930;000660;035720
+                        Dim bCodesRaw = req.QueryString("codes")
+                        If String.IsNullOrEmpty(bCodesRaw) Then
+                            resp = ApiResponse.Err("codes required", 400)
+                        Else
+                            Dim bCodes = bCodesRaw.Split({";"c, ","c}, StringSplitOptions.RemoveEmptyEntries)
+                            resp = Resolve(_apiService.GetStockMemberBatchAsync(bCodes))
+                        End If
+
+                    Case "/api/cybos/investor/trend"
+                        ' 투자자별 매매동향(잠정) 조회
+                        ' 사용: GET /api/cybos/investor/trend?type=2&market=0&value=0&sort=0
+                        Dim investType = ParseIntQuery(req, "type", 2)
+                        Dim mktType = If(req.QueryString("market"), "0")
+                        Dim valType = If(req.QueryString("value"), "0")
+                        Dim srtOrder = If(req.QueryString("sort"), "0")
+                        resp = Resolve(_apiService.GetInvestorTrendAsync(investType, mktType, valType, srtOrder))
+
+                    Case "/api/cybos/keyframe/capture"
+                        ' 키프레임 통합 캡처 (MarketEye + 5대창구 + 프로그램매매)
+                        ' 사용: GET /api/cybos/keyframe/capture?code=005930
+                        Dim kfCode = req.QueryString("code")
+                        If String.IsNullOrEmpty(kfCode) Then
+                            resp = ApiResponse.Err("code required", 400)
+                        Else
+                            resp = Resolve(_apiService.CaptureKeyframeAsync(kfCode.Trim()))
+                        End If
+                        '$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+
+
+
+
+
 
                     Case "/api/realtime/subscribe"
                         Dim codes = req.QueryString("codes")
@@ -258,14 +374,14 @@ Public Class WebApiServer
             ElseIf req.HttpMethod = "POST" Then
 
                 Using r As New StreamReader(CType(req.InputStream, Stream))
-                    Dim body = r.ReadToEnd()
+                    Dim body As String = r.ReadToEnd()
 
                     If path = "/api/orders" Then
                         Dim orq = JsonConvert.DeserializeObject(Of OrderRequest)(body)
-                        resp = Await _apiService.SendOrderAsync(orq)
+                        resp = Resolve(_apiService.SendOrderAsync(orq))
 
                     ElseIf path = "/api/auth/login" Then
-                        resp = Await _apiService.LoginAsync()
+                        resp = Resolve(_apiService.LoginAsync())
 
                     ElseIf path = "/api/market/names_to_codes" Then
                         Try
@@ -318,19 +434,78 @@ Public Class WebApiServer
             _logger.Warn($"[HTTP] Response send error ({path}): {ex.Message}")
         End Try
     End Sub
+    Private Shared Function Resolve(Of T)(tt As Task(Of T)) As T
+        Return tt.ConfigureAwait(False).GetAwaiter().GetResult()
+    End Function
+
+    ' WebApiServer.vb — WriteRawResponse 수정
 
     Private Sub WriteRawResponse(res As HttpListenerResponse, contentType As String, buf As Byte(), statusCode As Integer)
         If res Is Nothing Then Return
+        If buf Is Nothing Then buf = Array.Empty(Of Byte)()
+
         Try
             res.StatusCode = statusCode
             res.ContentType = contentType
             res.ContentLength64 = buf.Length
-            res.OutputStream.Write(buf, 0, buf.Length)
+        Catch ex As Exception
+            Debug.Print($"[WriteRawResponse] 헤더 설정 실패: {ex.Message}")
+            SafeCloseResponse(res)
+            Return
+        End Try
+
+        Try
+            If buf.Length > 0 Then
+                res.OutputStream.Write(buf, 0, buf.Length)
+            End If
+        Catch ex As HttpListenerException
+            Debug.Print($"[WriteRawResponse] 클라이언트 연결 끊김(write): {ex.Message}")
+            SafeCloseResponse(res)
+            Return
+        Catch ex As System.IO.IOException
+            Debug.Print($"[WriteRawResponse] IO 예외(write, 무시): {ex.Message}")
+            SafeCloseResponse(res)
+            Return
+        Catch ex As ObjectDisposedException
+            Debug.Print($"[WriteRawResponse] 응답 스트림 이미 종료(write): {ex.Message}")
+            Return
+        Catch ex As Exception
+            Debug.Print($"[WriteRawResponse] write 예외: {ex.Message}")
+            SafeCloseResponse(res)
+            Return
+        End Try
+
+        SafeCloseResponse(res)
+    End Sub
+
+    Private Sub SafeCloseResponse(res As HttpListenerResponse)
+        If res Is Nothing Then Return
+
+        Try
             res.OutputStream.Close()
-        Catch
-            ' 클라이언트 이탈, 이미 전송됨 등 모든 경우 무시
+        Catch ex As HttpListenerException
+            Debug.Print($"[WriteRawResponse] 클라이언트 연결 끊김(close): {ex.Message}")
+        Catch ex As System.IO.IOException
+            Debug.Print($"[WriteRawResponse] IO 예외(close, 무시): {ex.Message}")
+        Catch ex As ObjectDisposedException
+            Debug.Print($"[WriteRawResponse] 응답 스트림 이미 종료(close): {ex.Message}")
+        Catch ex As Exception
+            Debug.Print($"[WriteRawResponse] close 예외: {ex.Message}")
+        End Try
+
+        Try
+            res.Close()
+        Catch ex As HttpListenerException
+            Debug.Print($"[WriteRawResponse] 응답 close 중 연결 끊김: {ex.Message}")
+        Catch ex As System.IO.IOException
+            Debug.Print($"[WriteRawResponse] 응답 close IO 예외: {ex.Message}")
+        Catch ex As ObjectDisposedException
+            Debug.Print($"[WriteRawResponse] 응답 이미 종료: {ex.Message}")
+        Catch ex As Exception
+            Debug.Print($"[WriteRawResponse] 응답 close 예외: {ex.Message}")
         End Try
     End Sub
+
 
 
 End Class

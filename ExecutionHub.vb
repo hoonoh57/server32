@@ -151,7 +151,7 @@ Public Class ExecutionHub
             .timestamp = DateTime.Now.ToString("yyyyMMddHHmmss"),
             .data = resp.Data
         }
-        Dim jsonStr = JsonConvert.SerializeObject(payload)
+        Dim jsonStr As String = JsonConvert.SerializeObject(payload)
 
         If target IsNot Nothing Then
             Try

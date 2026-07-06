@@ -40,10 +40,11 @@ Public Module Util
         ' 공휴일 리스트를 정의 (국가별 공휴일을 추가)
         Dim holidays As New List(Of Date) From {
         New Date(targetDate.Year, 1, 1),    ' 신정
+        New Date(targetDate.Year, 3, 1),    ' 3.1절
+        New Date(targetDate.Year, 3, 2),    ' 3.2 대체공휴일
         New Date(targetDate.Year, 5, 1),    ' 노동자의날
         New Date(targetDate.Year, 5, 5),    ' 어린이날
         New Date(targetDate.Year, 5, 6),    ' 대체공휴일
-        New Date(targetDate.Year, 6, 3),    ' 대통령선거
         New Date(targetDate.Year, 9, 16),   ' 추석
         New Date(targetDate.Year, 9, 17),   ' 추석
         New Date(targetDate.Year, 9, 18),   ' 추석
@@ -64,10 +65,10 @@ Public Module Util
         ' 공휴일 리스트 (여기에 국가별 공휴일을 추가)
         Dim holidays As New List(Of Date) From {
         New Date(targetDate.Year, 1, 1),    ' 신정
+        New Date(targetDate.Year, 3, 1),    ' 3.1절
+        New Date(targetDate.Year, 3, 2),    ' 3.2 대체공휴일
         New Date(targetDate.Year, 5, 1),    ' 노동자의날
         New Date(targetDate.Year, 5, 5),    ' 어린이날
-        New Date(targetDate.Year, 5, 6),    ' 대체공휴일
-        New Date(targetDate.Year, 6, 3),    ' 대통령선거
         New Date(targetDate.Year, 6, 6),    ' 현충일
         New Date(targetDate.Year, 9, 16),   ' 추석
         New Date(targetDate.Year, 9, 17),   ' 추석
@@ -98,10 +99,10 @@ Public Module Util
         ' 공휴일 리스트 (여기에 국가별 공휴일을 추가)
         Dim holidays As New List(Of Date) From {
         New Date(targetDate.Year, 1, 1),    ' 신정
+        New Date(targetDate.Year, 3, 1),    ' 3.1절
+        New Date(targetDate.Year, 3, 2),    ' 3.2 대체공휴일
         New Date(targetDate.Year, 5, 1),    ' 노동자의날
         New Date(targetDate.Year, 5, 5),    ' 어린이날
-        New Date(targetDate.Year, 5, 6),    ' 대체공휴일
-        New Date(targetDate.Year, 6, 3),    ' 대통령선거
         New Date(targetDate.Year, 6, 6),    ' 현충일
         New Date(targetDate.Year, 9, 16),   ' 추석
         New Date(targetDate.Year, 9, 17),   ' 추석

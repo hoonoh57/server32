@@ -22,6 +22,10 @@ Public Class KiwoomApiService
     Private _loginTcs As TaskCompletionSource(Of ApiResponse)
     Private _condLoadTcs As TaskCompletionSource(Of List(Of ConditionInfo))
     Private _condResultTcs As TaskCompletionSource(Of String())
+    '///신규삽입
+    'Private ReadOnly _conditionRequestLock As New Object()
+    'Private Shared _conditionSearchScreenSeq As Integer = 9100
+    Private Shared _conditionStreamScreenSeq As Integer = 9200
 
     Private _isLoggedIn As Boolean = False
     Private _accountNo As String = ""
@@ -30,6 +34,24 @@ Public Class KiwoomApiService
     Private Shared _kwRqSeq As Integer = 0
     Private Shared _trRqSeq As Integer = 0
     Private ReadOnly _defaultAccountPassword As String = ""
+
+    '/////////////////////
+    Private ReadOnly _conditionRequestLock As New Object()
+    Private ReadOnly _conditionCacheLock As New Object()
+
+    Private Shared _conditionSearchScreenSeq As Integer = 9100
+    Private Const ConditionScreenReuseDelaySeconds As Integer = 60
+    Private Const ConditionCacheTtlSeconds As Integer = 60
+
+    Private Class ConditionCacheEntry
+        Public Codes As String()
+        Public FetchedAt As DateTime
+    End Class
+
+    Private ReadOnly _conditionCache As New Dictionary(Of String, ConditionCacheEntry)(StringComparer.OrdinalIgnoreCase)
+    Private ReadOnly _conditionScreenLastUsed As New Dictionary(Of String, DateTime)(StringComparer.OrdinalIgnoreCase)
+
+
 
     Public Class TrResult
         Public Rows As List(Of Dictionary(Of String, String))
@@ -79,9 +101,6 @@ Public Class KiwoomApiService
                                                 End Sub
     End Sub
 
-
-
-
     ' -------- UI Thread helpers (Based on Reference Code) --------
     Private Function UiInvokeAsync(action As Action) As Task
         Dim tcs As New TaskCompletionSource(Of Object)(TaskCreationOptions.RunContinuationsAsynchronously)
@@ -104,6 +123,106 @@ Public Class KiwoomApiService
         End If
         Return tcs.Task
     End Function
+
+    '///신규추가
+
+    Private Function BuildConditionCacheKey(name As String, index As Integer) As String
+        Return index.ToString() & "|" & If(name, String.Empty).Trim()
+    End Function
+
+    Private Function TryGetConditionCache(name As String, index As Integer, ByRef codes As String()) As Boolean
+        Dim key As String = BuildConditionCacheKey(name, index)
+
+        SyncLock _conditionCacheLock
+            Dim entry As ConditionCacheEntry = Nothing
+            If Not _conditionCache.TryGetValue(key, entry) Then Return False
+            If entry Is Nothing Then Return False
+
+            Dim ageSeconds As Double = (DateTime.Now - entry.FetchedAt).TotalSeconds
+            If ageSeconds > ConditionCacheTtlSeconds Then Return False
+
+            codes = If(entry.Codes, Array.Empty(Of String)())
+            Return True
+        End SyncLock
+    End Function
+
+    Private Sub SaveConditionCache(name As String, index As Integer, codes As String())
+        Dim key As String = BuildConditionCacheKey(name, index)
+
+        SyncLock _conditionCacheLock
+            _conditionCache(key) = New ConditionCacheEntry With {
+            .Codes = If(codes, Array.Empty(Of String)()),
+            .FetchedAt = DateTime.Now
+        }
+        End SyncLock
+    End Sub
+
+    Private Function NextConditionSearchScreen() As String
+        Dim attempt As Integer
+
+        For attempt = 0 To 99
+            Dim seq As Integer = Threading.Interlocked.Increment(_conditionSearchScreenSeq)
+            If seq > 9199 Then
+                _conditionSearchScreenSeq = 9101
+                seq = 9101
+            End If
+
+            Dim scr As String = seq.ToString()
+            Dim canUse As Boolean = True
+
+            SyncLock _conditionRequestLock
+                Dim lastUsed As DateTime = DateTime.MinValue
+                If _conditionScreenLastUsed.TryGetValue(scr, lastUsed) Then
+                    If (DateTime.Now - lastUsed).TotalSeconds < ConditionScreenReuseDelaySeconds Then
+                        canUse = False
+                    End If
+                End If
+
+                If canUse Then
+                    _conditionScreenLastUsed(scr) = DateTime.Now
+                    Return scr
+                End If
+            End SyncLock
+        Next
+
+        Return "9000"
+    End Function
+
+    Private Sub ClearConditionResultTcs(expected As TaskCompletionSource(Of String()))
+        SyncLock _conditionRequestLock
+            If Object.ReferenceEquals(_condResultTcs, expected) Then
+                _condResultTcs = Nothing
+            End If
+        End SyncLock
+    End Sub
+
+
+    Private Function UiInvokeAsync(Of T)(func As Func(Of T)) As Task(Of T)
+        Dim tcs As New TaskCompletionSource(Of T)(TaskCreationOptions.RunContinuationsAsynchronously)
+
+        If _api.InvokeRequired Then
+            _api.BeginInvoke(New MethodInvoker(Sub()
+                                                   Try
+                                                       Dim value As T = func()
+                                                       tcs.TrySetResult(value)
+                                                   Catch ex As Exception
+                                                       tcs.TrySetException(ex)
+                                                   End Try
+                                               End Sub))
+        Else
+            Try
+                Dim value As T = func()
+                tcs.TrySetResult(value)
+            Catch ex As Exception
+                tcs.TrySetException(ex)
+            End Try
+        End If
+
+        Return tcs.Task
+    End Function
+
+
+
 
     Private Function UiInvoke(Of T)(func As Func(Of T)) As T
         If _api.InvokeRequired Then
@@ -147,6 +266,62 @@ Public Class KiwoomApiService
     End Sub
 
     ' ----- Conditions -----
+
+    '///신규추가(2026/07/06)
+    'Private Function NextConditionSearchScreen() As String
+    '    Dim seq As Integer = Threading.Interlocked.Increment(_conditionSearchScreenSeq)
+    '    If seq > 9199 Then
+    '        _conditionSearchScreenSeq = 9101
+    '        seq = 9101
+    '    End If
+    '    Return seq.ToString()
+    'End Function
+
+    Private Function NextConditionStreamScreen() As String
+        Dim seq As Integer = Threading.Interlocked.Increment(_conditionStreamScreenSeq)
+        If seq > 9299 Then
+            _conditionStreamScreenSeq = 9201
+            seq = 9201
+        End If
+        Return seq.ToString()
+    End Function
+
+    Private Function NormalizeConditionCodeList(raw As String) As String()
+        If String.IsNullOrWhiteSpace(raw) Then Return Array.Empty(Of String)()
+
+        Return raw.Split(";"c).
+        Select(Function(s) If(s, String.Empty).Trim()).
+        Where(Function(s) s.Length > 0).
+        Select(Function(s)
+                   If s.StartsWith("A", StringComparison.OrdinalIgnoreCase) AndAlso s.Length = 7 Then
+                       Return s.Substring(1)
+                   End If
+                   Return s
+               End Function).
+        ToArray()
+    End Function
+
+    'Private Sub ClearConditionResultTcs(expected As TaskCompletionSource(Of String()))
+    '    SyncLock _conditionRequestLock
+    '        If Object.ReferenceEquals(_condResultTcs, expected) Then
+    '            _condResultTcs = Nothing
+    '        End If
+    '    End SyncLock
+    'End Sub
+
+    Private Sub StopConditionSafe(screen As String, name As String, index As Integer)
+        Try
+            UiInvoke(Of Object)(Function()
+                                    _api.SendConditionStop(screen, name, index)
+                                    Return Nothing
+                                End Function)
+        Catch ex As Exception
+            _logger.Warn($"[Condition] SendConditionStop failed. screen={screen}, name={name}, index={index}, error={ex.Message}")
+        End Try
+    End Sub
+    '/////////////////////////////
+
+
     Public Async Function LoadConditionsAsync() As Task(Of ApiResponse)
         _condLoadTcs = New TaskCompletionSource(Of List(Of ConditionInfo))(TaskCreationOptions.RunContinuationsAsynchronously)
         Await UiInvokeAsync(Sub() _api.GetConditionLoad())
@@ -173,47 +348,247 @@ Public Class KiwoomApiService
         End Try
     End Sub
 
+    '///신규교체
     Public Async Function SearchConditionAsync(name As String, index As Integer) As Task(Of ApiResponse)
-        _condResultTcs = New TaskCompletionSource(Of String())(TaskCreationOptions.RunContinuationsAsynchronously)
-        Await UiInvokeAsync(Sub() _api.SendCondition("9000", name, index, 0))
-        Dim done = Await Task.WhenAny(_condResultTcs.Task, Task.Delay(15000))
-        If done IsNot _condResultTcs.Task Then
-            Return ApiResponse.Err("SearchCondition Timeout", 504)
+        If String.IsNullOrWhiteSpace(name) Then
+            Return ApiResponse.Err("Condition name is required", 400)
         End If
 
-        Dim codes As String() = _condResultTcs.Task.Result
-        Dim detailRows As List(Of Dictionary(Of String, String)) = New List(Of Dictionary(Of String, String))()
+        Dim cachedCodes As String() = Nothing
+        If TryGetConditionCache(name, index, cachedCodes) Then
+            Dim cachedPayload = New With {
+            .Codes = cachedCodes,
+            .Stocks = New List(Of Dictionary(Of String, String))(),
+            .Cached = True,
+            .CacheTtlSeconds = ConditionCacheTtlSeconds
+        }
 
-        If codes IsNot Nothing AndAlso codes.Length > 0 Then
-            Try
-                detailRows = Await FetchConditionStockInfoAsync(codes)
-            Catch ex As Exception
-                _logger.Warn($"[Condition] Failed to load KW data: {ex.Message}")
-            End Try
+            Return ApiResponse.Ok(cachedPayload, "OK (cached)")
+        End If
+
+        Dim scr As String = NextConditionSearchScreen()
+        Dim localTcs As New TaskCompletionSource(Of String())(TaskCreationOptions.RunContinuationsAsynchronously)
+
+        SyncLock _conditionRequestLock
+            If _condResultTcs IsNot Nothing Then
+                Return ApiResponse.Err("Another condition search is already pending", 429)
+            End If
+
+            _condResultTcs = localTcs
+        End SyncLock
+
+        Dim sendRet As Integer = -1
+
+        Try
+            Await UiInvokeAsync(Sub()
+                                    sendRet = _api.SendCondition(scr, name, index, 0)
+                                End Sub)
+
+            If sendRet <> 1 Then
+                ClearConditionResultTcs(localTcs)
+                Return ApiResponse.Err(
+                $"SendCondition failed. name={name}, index={index}, screen={scr}, ret={sendRet}. Possible Kiwoom screen reuse/state issue.",
+                502)
+            End If
+
+            Dim done As Task = Await Task.WhenAny(localTcs.Task, Task.Delay(30000))
+
+            If done IsNot localTcs.Task Then
+                ClearConditionResultTcs(localTcs)
+                Return ApiResponse.Err(
+                $"SearchCondition Timeout. name={name}, index={index}, screen={scr}, ret={sendRet}",
+                504)
+            End If
+
+            If localTcs.Task.IsFaulted Then
+                ClearConditionResultTcs(localTcs)
+                Dim msg As String = localTcs.Task.Exception.GetBaseException().Message
+                Return ApiResponse.Err(
+                $"SearchCondition result exception. name={name}, index={index}, screen={scr}, error={msg}",
+                500)
+            End If
+
+            Dim codes As String() = localTcs.Task.Result
+            If codes Is Nothing Then codes = Array.Empty(Of String)()
+
+            ClearConditionResultTcs(localTcs)
+            SaveConditionCache(name, index, codes)
+
+            Dim payload = New With {
+            .Codes = codes,
+            .Stocks = New List(Of Dictionary(Of String, String))(),
+            .Cached = False,
+            .Screen = scr,
+            .CacheTtlSeconds = ConditionCacheTtlSeconds
+        }
+
+            Return ApiResponse.Ok(payload)
+
+        Catch ex As Exception
+            ClearConditionResultTcs(localTcs)
+            Return ApiResponse.Err(
+            $"SearchCondition exception. name={name}, index={index}, screen={scr}, ret={sendRet}, error={ex.Message}",
+            500)
+        End Try
+    End Function
+
+    'Public Async Function SearchConditionAsync(name As String, index As Integer) As Task(Of ApiResponse)
+    '    If String.IsNullOrWhiteSpace(name) Then
+    '        Return ApiResponse.Err("Condition name is required", 400)
+    '    End If
+
+    '    Dim scr As String = GetNextConditionScreen()
+    '    Dim localTcs As New TaskCompletionSource(Of String())(TaskCreationOptions.RunContinuationsAsynchronously)
+
+    '    _condResultTcs = localTcs
+
+    '    Dim sendRet As Integer = -1
+
+    '    Try
+    '        sendRet = Await UiInvokeAsync(Function()
+    '                                          Return _api.SendCondition(scr, name, index, 0)
+    '                                      End Function)
+
+    '        If sendRet <> 1 Then
+    '            Return ApiResponse.Err($"SendCondition failed. name={name}, index={index}, screen={scr}, ret={sendRet}", 502)
+    '        End If
+
+    '        Dim done = Await Task.WhenAny(localTcs.Task, Task.Delay(30000))
+
+    '        If done IsNot localTcs.Task Then
+    '            Try
+    '                Await UiInvokeAsync(Sub() _api.SendConditionStop(scr, name, index))
+    '            Catch ex As Exception
+    '                _logger.Warn($"[Condition] SendConditionStop failed after timeout: {ex.Message}")
+    '            End Try
+
+    '            Return ApiResponse.Err($"SearchCondition Timeout. name={name}, index={index}, screen={scr}, ret={sendRet}", 504)
+    '        End If
+
+    '        Dim codes As String() = localTcs.Task.Result
+    '        If codes Is Nothing Then codes = Array.Empty(Of String)()
+
+    '        Dim payload = New With {
+    '        .Codes = codes,
+    '        .Stocks = New List(Of Dictionary(Of String, String))()
+    '    }
+
+    '        Try
+    '            Await UiInvokeAsync(Sub() _api.SendConditionStop(scr, name, index))
+    '        Catch ex As Exception
+    '            _logger.Warn($"[Condition] SendConditionStop failed after success: {ex.Message}")
+    '        End Try
+
+    '        Return ApiResponse.Ok(payload)
+
+    '    Catch ex As Exception
+    '        Try
+    '            Await UiInvokeAsync(Sub() _api.SendConditionStop(scr, name, index))
+    '        Catch
+    '        End Try
+
+    '        Return ApiResponse.Err($"SearchCondition exception. name={name}, index={index}, screen={scr}, ret={sendRet}, error={ex.Message}", 500)
+    '    Finally
+    '        If Object.ReferenceEquals(_condResultTcs, localTcs) Then
+    '            _condResultTcs = Nothing
+    '        End If
+    '    End Try
+    'End Function
+
+    Private _conditionScreenSeq As Integer = 9100
+
+    Private Function GetNextConditionScreen() As String
+        _conditionScreenSeq += 1
+        If _conditionScreenSeq > 9199 Then _conditionScreenSeq = 9101
+        Return _conditionScreenSeq.ToString()
+    End Function
+
+    '///신규교체
+    Public Async Function StartConditionStreamAsync(name As String, index As Integer, screen As String) As Task(Of ApiResponse)
+        If String.IsNullOrWhiteSpace(name) Then
+            Return ApiResponse.Err("Condition name is required", 400)
+        End If
+
+        Dim scr As String = If(String.IsNullOrWhiteSpace(screen), NextConditionStreamScreen(), screen.Trim())
+
+        Dim sendTask As Task(Of Integer) = UiInvokeAsync(Of Integer)(Function()
+                                                                         Return _api.SendCondition(scr, name, index, 1)
+                                                                     End Function)
+
+        Dim sendDone As Task = Await Task.WhenAny(sendTask, Task.Delay(5000))
+
+        If sendDone IsNot sendTask Then
+            StopConditionSafe(scr, name, index)
+            Return ApiResponse.Err($"SendCondition stream call timeout. name={name}, index={index}, screen={scr}", 504)
+        End If
+
+        If sendTask.IsFaulted Then
+            StopConditionSafe(scr, name, index)
+
+            Dim msg As String = sendTask.Exception.GetBaseException().Message
+            Return ApiResponse.Err($"SendCondition stream exception. name={name}, index={index}, screen={scr}, error={msg}", 500)
+        End If
+
+        Dim sendRet As Integer = sendTask.Result
+
+        If sendRet <> 1 Then
+            StopConditionSafe(scr, name, index)
+            Return ApiResponse.Err($"SendCondition stream failed. name={name}, index={index}, screen={scr}, ret={sendRet}", 502)
         End If
 
         Dim payload = New With {
-            .Codes = codes,
-            .Stocks = detailRows
+        .Name = name,
+        .Index = index,
+        .Screen = scr,
+        .Ret = sendRet
+    }
+
+        Return ApiResponse.Ok(payload, $"Condition stream started: {name} ({index}) @ {scr}")
+    End Function
+
+
+
+    'Public Async Function StartConditionStreamAsync(name As String, index As Integer, screen As String) As Task(Of ApiResponse)
+    '    Dim scr = If(String.IsNullOrWhiteSpace(screen), "9001", screen)
+    '    Await UiInvokeAsync(Sub() _api.SendCondition(scr, name, index, 1))
+    '    Return ApiResponse.Ok(Nothing, $"Condition stream started: {name} ({index}) @ {scr}")
+    'End Function
+
+    '///신규교체
+    Public Function StopConditionStream(name As String, index As Integer, screen As String) As ApiResponse
+        If String.IsNullOrWhiteSpace(name) Then
+            Return ApiResponse.Err("Condition name is required", 400)
+        End If
+
+        Dim scr As String = If(String.IsNullOrWhiteSpace(screen), "9001", screen.Trim())
+
+        Try
+            UiInvoke(Of Object)(Function()
+                                    _api.SendConditionStop(scr, name, index)
+                                    Return Nothing
+                                End Function)
+
+            Dim payload = New With {
+            .Name = name,
+            .Index = index,
+            .Screen = scr
         }
 
-        Return ApiResponse.Ok(payload)
+            Return ApiResponse.Ok(payload, $"Condition stream stopped: {name} ({index}) @ {scr}")
+
+        Catch ex As Exception
+            Return ApiResponse.Err($"StopConditionStream exception. name={name}, index={index}, screen={scr}, error={ex.Message}", 500)
+        End Try
     End Function
 
-    Public Async Function StartConditionStreamAsync(name As String, index As Integer, screen As String) As Task(Of ApiResponse)
-        Dim scr = If(String.IsNullOrWhiteSpace(screen), "9001", screen)
-        Await UiInvokeAsync(Sub() _api.SendCondition(scr, name, index, 1))
-        Return ApiResponse.Ok(Nothing, $"Condition stream started: {name} ({index}) @ {scr}")
-    End Function
-
-    Public Function StopConditionStream(name As String, index As Integer, screen As String) As ApiResponse
-        Dim scr = If(String.IsNullOrWhiteSpace(screen), "9001", screen)
-        UiInvoke(Of Object)(Function()
-                                _api.SendConditionStop(scr, name, index)
-                                Return Nothing
-                            End Function)
-        Return ApiResponse.Ok(Nothing, $"Condition stream stopped: {name} ({index})")
-    End Function
+    'Public Function StopConditionStream(name As String, index As Integer, screen As String) As ApiResponse
+    '    Dim scr = If(String.IsNullOrWhiteSpace(screen), "9001", screen)
+    '    UiInvoke(Of Object)(Function()
+    '                            _api.SendConditionStop(scr, name, index)
+    '                            Return Nothing
+    '                        End Function)
+    '    Return ApiResponse.Ok(Nothing, $"Condition stream stopped: {name} ({index})")
+    'End Function
 
     Public Function GetDashboardSnapshot() As ApiResponse
         SyncLock _dashboardLock
@@ -410,20 +785,20 @@ Public Class KiwoomApiService
 
     Public Function ApplyBalanceChejan(raw As Dictionary(Of String, String)) As AccountSnapshot
         If raw Is Nothing OrElse raw.Count = 0 Then Return Nothing
-        Dim account = GetChejanValue(raw, "9201")
+        Dim account As String = GetChejanValue(raw, "9201")
         If String.IsNullOrWhiteSpace(account) OrElse Not String.Equals(account.Trim(), _accountNo) Then Return Nothing
 
-        Dim code = NormalizeStockCode(GetChejanValue(raw, "9001"))
+        Dim code As String = NormalizeStockCode(GetChejanValue(raw, "9001"))
         If String.IsNullOrEmpty(code) Then Return Nothing
 
-        Dim name = GetChejanValue(raw, "302")
-        Dim qty = ParseNumericValue(GetChejanValue(raw, "930"))
-        Dim availQty = ParseNumericValue(GetChejanValue(raw, "933"))
-        Dim currentPrice = ParseNumericValue(GetChejanValue(raw, "10"))
-        Dim purchaseAmount = ParseNumericValue(GetChejanValue(raw, "932"))
-        Dim purchasePrice = ParseNumericValue(GetChejanValue(raw, "931"))
-        Dim pnlRate = ParseNumericValue(GetChejanValue(raw, "8019"))
-        Dim deposit = ParseNumericValue(GetChejanValue(raw, "951"))
+        Dim name As String = GetChejanValue(raw, "302")
+        Dim qty As Double = ParseNumericValue(GetChejanValue(raw, "930"))
+        Dim availQty As Double = ParseNumericValue(GetChejanValue(raw, "933"))
+        Dim currentPrice As Double = ParseNumericValue(GetChejanValue(raw, "10"))
+        Dim purchaseAmount As Double = ParseNumericValue(GetChejanValue(raw, "932"))
+        Dim purchasePrice As Double = ParseNumericValue(GetChejanValue(raw, "931"))
+        Dim pnlRate As Double = ParseNumericValue(GetChejanValue(raw, "8019"))
+        Dim deposit As Double = ParseNumericValue(GetChejanValue(raw, "951"))
 
         Dim evalAmount As Double = If(currentPrice > 0 AndAlso qty > 0, currentPrice * qty, purchaseAmount)
         Dim pnlAmount As Double = evalAmount - purchaseAmount
@@ -441,7 +816,7 @@ Public Class KiwoomApiService
         }
 
         SyncLock _dashboardLock
-            Dim snap = EnsureDashboardSnapshot()
+            Dim snap As AccountSnapshot = EnsureDashboardSnapshot()
             Dim replaced As Boolean = False
             If snap.Holdings Is Nothing Then
                 snap.Holdings = New List(Of Dictionary(Of String, String))()
@@ -632,10 +1007,41 @@ Public Class KiwoomApiService
         Return clone
     End Function
 
+
+    '///신규교체
     Private Sub OnReceiveTrCondition(sender As Object, e As _DKHOpenAPIEvents_OnReceiveTrConditionEvent)
-        Dim codes = If(e.strCodeList, "").Split(";"c).Where(Function(s) s.Length > 0).ToArray()
-        _condResultTcs?.TrySetResult(codes)
+        Try
+            Dim codes As String() = NormalizeConditionCodeList(e.strCodeList)
+
+            Dim tcs As TaskCompletionSource(Of String()) = Nothing
+            SyncLock _conditionRequestLock
+                tcs = _condResultTcs
+            End SyncLock
+
+            If tcs IsNot Nothing Then
+                tcs.TrySetResult(codes)
+            Else
+                _logger.Info($"[Condition] OnReceiveTrCondition without pending search. name={e.strConditionName}, index={e.nIndex}, count={codes.Length}")
+            End If
+
+        Catch ex As Exception
+            Dim tcs As TaskCompletionSource(Of String()) = Nothing
+            SyncLock _conditionRequestLock
+                tcs = _condResultTcs
+            End SyncLock
+
+            If tcs IsNot Nothing Then
+                tcs.TrySetException(ex)
+            End If
+
+            _logger.Errors($"[Condition] OnReceiveTrCondition failed: {ex.Message}")
+        End Try
     End Sub
+
+    'Private Sub OnReceiveTrCondition(sender As Object, e As _DKHOpenAPIEvents_OnReceiveTrConditionEvent)
+    '    Dim codes = If(e.strCodeList, "").Split(";"c).Where(Function(s) s.Length > 0).ToArray()
+    '    _condResultTcs?.TrySetResult(codes)
+    'End Sub
 
     ' ----- Orders -----
     Public Async Function SendOrderAsync(req As OrderRequest) As Task(Of ApiResponse)
@@ -692,6 +1098,61 @@ Public Class KiwoomApiService
     ' ----- Smart Fetch Implementations -----
 
     Private _cybos As New Cybos()
+    '///Private Shared ReadOnly _cybosCandleSlots As New SemaphoreSlim(3, 3)
+    Private Shared ReadOnly _cybosCandleSlots As New SemaphoreSlim(1, 1)
+
+    '///새 로직
+    Private Shared Async Function RunCybosCandleRequestAsync(code As String,
+                                                        timeframe As String,
+                                                        fromDate As String,
+                                                        toDate As String) As Task(Of List(Of Candle))
+        Await _cybosCandleSlots.WaitAsync().ConfigureAwait(False)
+
+        Try
+            Return Await RunOnStaThreadAsync(Function()
+                                                 Dim cybosClient As New Cybos()
+                                                 Return cybosClient.DownloadCandlesByPeriod(code, timeframe, fromDate, toDate)
+                                             End Function).ConfigureAwait(False)
+
+        Catch ex As Exception
+            Throw New InvalidOperationException(
+            $"Cybos candle request failed. code={code}, timeframe={timeframe}, fromDate={fromDate}, toDate={toDate}, error={ex.Message}",
+            ex)
+
+        Finally
+            _cybosCandleSlots.Release()
+        End Try
+    End Function
+
+    'Private Shared Async Function RunCybosCandleRequestAsync(code As String,
+    '                                                        timeframe As String,
+    '                                                        fromDate As String,
+    '                                                        toDate As String) As Task(Of List(Of Candle))
+    '    Await _cybosCandleSlots.WaitAsync().ConfigureAwait(False)
+    '    Try
+    '        Return Await RunOnStaThreadAsync(Function()
+    '                                             Dim cybosClient As New Cybos()
+    '                                             Return cybosClient.DownloadCandlesByPeriod(code, timeframe, fromDate, toDate)
+    '                                         End Function).ConfigureAwait(False)
+    '    Finally
+    '        _cybosCandleSlots.Release()
+    '    End Try
+    'End Function
+
+    Private Shared Function RunOnStaThreadAsync(Of T)(work As Func(Of T)) As Task(Of T)
+        Dim tcs As New TaskCompletionSource(Of T)()
+        Dim worker As New Thread(Sub()
+                                     Try
+                                         tcs.SetResult(work())
+                                     Catch ex As Exception
+                                         tcs.SetException(ex)
+                                     End Try
+                                 End Sub)
+        worker.IsBackground = True
+        worker.SetApartmentState(ApartmentState.STA)
+        worker.Start()
+        Return tcs.Task
+    End Function
 
     ' 일봉: date(최신, YYYYMMDD) -> stopDate(과거)
     Public Async Function GetDailyCandlesAsync(code As String, [date] As String, stopDate As String) As Task(Of ApiResponse)
@@ -702,7 +1163,7 @@ Public Class KiwoomApiService
             Dim toDate As String = If(String.IsNullOrEmpty([date]), DateTime.Now.ToString("yyyyMMdd"), [date])
             Dim fromDate As String = stopDate
 
-            Dim candles = Await _cybos.DownloadCandlesByPeriod(code, "D", fromDate, toDate)
+            Dim candles = Await RunCybosCandleRequestAsync(code, "D", fromDate, toDate)
 
             Dim rows As New List(Of Dictionary(Of String, String))
             For Each c As Candle In candles
@@ -714,6 +1175,11 @@ Public Class KiwoomApiService
                 d("현재가") = c.Close.ToString() ' 종가와 동일취급
                 d("종가") = c.Close.ToString()
                 d("거래량") = c.Volume.ToString()
+                d("거래대금") = c.TradingValue.ToString()
+                d("등락률") = c.ChangeRate.ToString()
+                d("대비부호") = c.ChangeSign.ToString()
+                d("상장주식수") = c.SharesOutstanding.ToString()
+                d("시가총액") = c.MarketCap.ToString()
                 rows.Add(d)
             Next
             Return ApiResponse.Ok(rows)
@@ -729,7 +1195,7 @@ Public Class KiwoomApiService
             Dim fromDate As String = stopTime.Substring(0, 12) ' yyyyMMddHHmm
             Dim toDate As String = DateTime.Now.ToString("yyyyMMddHHmm")
 
-            Dim candles = Await _cybos.DownloadCandlesByPeriod(code, "m" & tick, fromDate, toDate)
+            Dim candles = Await RunCybosCandleRequestAsync(code, "m" & tick, fromDate, toDate)
 
             Dim rows As New List(Of Dictionary(Of String, String))
             For Each c As Candle In candles
@@ -755,7 +1221,7 @@ Public Class KiwoomApiService
             Dim fromDate As String = stopTime.Substring(0, 12)
             Dim toDate As String = DateTime.Now.ToString("yyyyMMddHHmm")
 
-            Dim candles = Await _cybos.DownloadCandlesByPeriod(code, "T" & tick, fromDate, toDate)
+            Dim candles = Await RunCybosCandleRequestAsync(code, "T" & tick, fromDate, toDate)
 
             Dim rows As New List(Of Dictionary(Of String, String))
             For Each c As Candle In candles
@@ -948,6 +1414,333 @@ Public Class KiwoomApiService
         End Try
     End Function
     '///////////프로그램 순매수정보 삽입 완료/////////////////////////////
+
+    '$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+
+    '///////////MarketEye / StockMember / InvestorTrend / Keyframe 핸들러 삽입 시작/////
+
+    ''' <summary>MarketEye 일괄 수급 조회 (최대 200종목)</summary>
+    Public Async Function GetMarketEyeSupplyAsync(codes As String()) As Task(Of ApiResponse)
+        Try
+            If codes Is Nothing OrElse codes.Length = 0 Then
+                Return ApiResponse.Err("codes required", 400)
+            End If
+
+            Dim items As List(Of Cybos.MarketEyeItem) = Nothing
+
+            Await UiInvokeAsync(Sub()
+                                    items = _cybos.FetchMarketEyeSupply(codes)
+                                End Sub)
+
+            If items Is Nothing Then items = New List(Of Cybos.MarketEyeItem)
+
+            Dim result As New List(Of Dictionary(Of String, Object))
+            For Each item As Cybos.MarketEyeItem In items
+                Dim d As New Dictionary(Of String, Object)
+                d("종목코드") = item.Code
+                d("종목명") = item.StockName
+                d("현재가") = item.CurrentPrice
+                d("대비부호") = item.DiffSign
+                d("전일대비") = item.Diff
+                d("시가") = item.Open
+                d("고가") = item.High
+                d("저가") = item.Low
+                d("거래량") = item.Volume
+                d("거래대금_원") = item.TradeValue
+                d("전일거래량") = item.PrevVolume
+                d("체결강도") = item.Intensity
+                d("총매도호가잔량") = item.TotalAskRemain
+                d("총매수호가잔량") = item.TotalBidRemain
+                d("외국인보유비율") = item.ForeignHoldRatio
+                d("외국인순매매_주") = item.ForeignNetShares
+                d("프로그램순매수") = item.ProgramNet
+                d("당일외국인잠정구분") = item.ForeignConfirm
+                d("당일외국인순매수") = item.ForeignNetToday
+                d("당일기관잠정구분") = item.InstConfirm
+                d("당일기관순매수") = item.InstNetToday
+                d("당일개인잠정구분") = item.IndividualConfirm
+                d("당일개인순매수") = item.IndividualNetToday
+                d("신용잔고율") = item.CreditRatio
+                ' 파생 지표
+                d("호가잔량비율") = If(item.TotalAskRemain > 0,
+                    Math.Round(CDbl(item.TotalBidRemain) / CDbl(item.TotalAskRemain), 3), 0.0)
+                result.Add(d)
+            Next
+
+            Return ApiResponse.Ok(result, $"MarketEye {items.Count}종목 조회 완료")
+        Catch ex As Exception
+            _logger.Errors($"[GetMarketEyeSupply] {ex.Message}")
+            Return ApiResponse.Err(ex.Message, 500)
+        End Try
+    End Function
+
+    ''' <summary>5대 매매창구 (단일 종목)</summary>
+    Public Async Function GetStockMemberTop5Async(code As String) As Task(Of ApiResponse)
+        Try
+            If String.IsNullOrWhiteSpace(code) Then
+                Return ApiResponse.Err("code required", 400)
+            End If
+
+            Dim memberResult As Cybos.StockMemberResult = Nothing
+            Await UiInvokeAsync(Sub()
+                                    memberResult = _cybos.FetchStockMemberTop5(code)
+                                End Sub)
+
+            If memberResult Is Nothing Then
+                Return ApiResponse.Err("StockMember data not available")
+            End If
+
+            Dim d As New Dictionary(Of String, Object)
+            d("종목코드") = memberResult.Code
+            d("시각") = memberResult.Timestamp
+            d("액면가") = memberResult.FaceValue
+            d("매수상위5합계") = memberResult.Top5BuyTotal
+            d("매도상위5합계") = memberResult.Top5SellTotal
+
+            Dim membersList As New List(Of Dictionary(Of String, Object))
+            For Each m As Cybos.StockMemberItem In memberResult.Members
+                membersList.Add(New Dictionary(Of String, Object) From {
+                    {"순위", m.Rank},
+                    {"매도거래원", m.SellMemberName},
+                    {"매수거래원", m.BuyMemberName},
+                    {"매도수량", m.SellQty},
+                    {"매수수량", m.BuyQty}
+                })
+            Next
+            d("거래원목록") = membersList
+
+            Return ApiResponse.Ok(d, $"5대창구 {memberResult.Members.Count}건")
+        Catch ex As Exception
+            _logger.Errors($"[GetStockMemberTop5] {ex.Message}")
+            Return ApiResponse.Err(ex.Message, 500)
+        End Try
+    End Function
+
+    ''' <summary>5대 창구 일괄 조회 (복수 종목, 종목당 200ms 간격)</summary>
+    Public Async Function GetStockMemberBatchAsync(codes As String()) As Task(Of ApiResponse)
+        Try
+            If codes Is Nothing OrElse codes.Length = 0 Then
+                Return ApiResponse.Err("codes required", 400)
+            End If
+
+            Dim allResults As New List(Of Dictionary(Of String, Object))
+
+            For Each code As String In codes
+                If String.IsNullOrWhiteSpace(code) Then Continue For
+
+                Dim memberResult As Cybos.StockMemberResult = Nothing
+                Await UiInvokeAsync(Sub()
+                                        memberResult = _cybos.FetchStockMemberTop5(code.Trim())
+                                    End Sub)
+
+                If memberResult Is Nothing OrElse memberResult.Members.Count = 0 Then Continue For
+
+                Dim d As New Dictionary(Of String, Object)
+                d("종목코드") = memberResult.Code
+                d("매수상위5합계") = memberResult.Top5BuyTotal
+                d("매도상위5합계") = memberResult.Top5SellTotal
+
+                Dim membersList As New List(Of Dictionary(Of String, Object))
+                For Each m As Cybos.StockMemberItem In memberResult.Members
+                    membersList.Add(New Dictionary(Of String, Object) From {
+                        {"순위", m.Rank},
+                        {"매도거래원", m.SellMemberName},
+                        {"매수거래원", m.BuyMemberName},
+                        {"매도수량", m.SellQty},
+                        {"매수수량", m.BuyQty}
+                    })
+                Next
+                d("거래원목록") = membersList
+                allResults.Add(d)
+
+                Await Task.Delay(200)
+            Next
+
+            Return ApiResponse.Ok(allResults, $"5대창구 일괄조회 {allResults.Count}종목")
+        Catch ex As Exception
+            _logger.Errors($"[GetStockMemberBatch] {ex.Message}")
+            Return ApiResponse.Err(ex.Message, 500)
+        End Try
+    End Function
+
+    ''' <summary>투자자별 매매동향 잠정 (CpSvr7210d)</summary>
+    Public Async Function GetInvestorTrendAsync(investType As Integer,
+                                                 Optional marketType As String = "0",
+                                                 Optional valueType As String = "0",
+                                                 Optional sortOrder As String = "0") As Task(Of ApiResponse)
+        Try
+            Dim items As List(Of Cybos.InvestorTrendItem) = Nothing
+            Await UiInvokeAsync(Sub()
+                                    items = _cybos.FetchInvestorTrend(investType, marketType, valueType, sortOrder)
+                                End Sub)
+
+            If items Is Nothing Then items = New List(Of Cybos.InvestorTrendItem)
+
+            Dim result As New List(Of Dictionary(Of String, Object))
+            For Each item As Cybos.InvestorTrendItem In items
+                result.Add(New Dictionary(Of String, Object) From {
+                    {"종목코드", item.Code},
+                    {"종목명", item.Name},
+                    {"현재가", item.CurrentPrice},
+                    {"전일대비", item.Diff},
+                    {"대비율", item.DiffRate},
+                    {"거래량", item.Volume},
+                    {"외국인순매수", item.ForeignNet},
+                    {"기관순매수", item.InstNet},
+                    {"보험기타순매수", item.InsuranceNet},
+                    {"투신순매수", item.TrustNet},
+                    {"은행순매수", item.BankNet},
+                    {"연기금순매수", item.PensionNet},
+                    {"국가지자체순매수", item.GovNet},
+                    {"기타법인순매수", item.EtcCorpNet}
+                })
+            Next
+
+            Dim investName As String = ""
+            Select Case investType
+                Case 0 : investName = "종합"
+                Case 1 : investName = "외국인"
+                Case 2 : investName = "기관계"
+                Case 3 : investName = "보험기타"
+                Case 4 : investName = "투신"
+                Case 5 : investName = "은행"
+                Case 6 : investName = "연기금"
+                Case 7 : investName = "기타법인"
+                Case 8 : investName = "개인"
+                Case Else : investName = $"유형{investType}"
+            End Select
+
+            Return ApiResponse.Ok(result, $"투자자동향({investName}) {items.Count}건")
+        Catch ex As Exception
+            _logger.Errors($"[GetInvestorTrend] {ex.Message}")
+            Return ApiResponse.Err(ex.Message, 500)
+        End Try
+    End Function
+
+    ''' <summary>키프레임 통합 캡처 (MarketEye + 5대창구 + 프로그램매매)</summary>
+    Public Async Function CaptureKeyframeAsync(code As String) As Task(Of ApiResponse)
+        Try
+            If String.IsNullOrWhiteSpace(code) Then
+                Return ApiResponse.Err("code required", 400)
+            End If
+
+            Dim cleanCode = code.Trim()
+            Dim keyframe As New Dictionary(Of String, Object)
+            keyframe("capture_time") = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")
+            keyframe("종목코드") = cleanCode
+
+            ' 1) MarketEye 수급 데이터
+            Dim supplyItems As List(Of Cybos.MarketEyeItem) = Nothing
+            Await UiInvokeAsync(Sub()
+                                    supplyItems = _cybos.FetchMarketEyeSupply({cleanCode})
+                                End Sub)
+
+            If supplyItems IsNot Nothing AndAlso supplyItems.Count > 0 Then
+                Dim s = supplyItems(0)
+                Dim supplyData As New Dictionary(Of String, Object)
+                supplyData("종목명") = s.StockName
+                supplyData("현재가") = s.CurrentPrice
+                supplyData("시가") = s.Open
+                supplyData("고가") = s.High
+                supplyData("저가") = s.Low
+                supplyData("거래량") = s.Volume
+                supplyData("거래대금_원") = s.TradeValue
+                supplyData("체결강도") = s.Intensity
+                supplyData("총매도호가잔량") = s.TotalAskRemain
+                supplyData("총매수호가잔량") = s.TotalBidRemain
+                supplyData("호가잔량비율") = If(s.TotalAskRemain > 0,
+                    Math.Round(CDbl(s.TotalBidRemain) / CDbl(s.TotalAskRemain), 3), 0.0)
+                supplyData("외국인보유비율") = s.ForeignHoldRatio
+                supplyData("외국인순매매_주") = s.ForeignNetShares
+                supplyData("프로그램순매수") = s.ProgramNet
+                supplyData("당일외국인순매수") = s.ForeignNetToday
+                supplyData("당일외국인잠정구분") = s.ForeignConfirm
+                supplyData("당일기관순매수") = s.InstNetToday
+                supplyData("당일기관잠정구분") = s.InstConfirm
+                supplyData("당일개인순매수") = s.IndividualNetToday
+                supplyData("신용잔고율") = s.CreditRatio
+                keyframe("supply") = supplyData
+            Else
+                keyframe("supply") = Nothing
+            End If
+
+            Await Task.Delay(200) ' Rate limit 방어
+
+            ' 2) 5대 창구 데이터
+            Dim memberResult As Cybos.StockMemberResult = Nothing
+            Await UiInvokeAsync(Sub()
+                                    memberResult = _cybos.FetchStockMemberTop5(cleanCode)
+                                End Sub)
+
+            If memberResult IsNot Nothing AndAlso memberResult.Members.Count > 0 Then
+                Dim memberData As New Dictionary(Of String, Object)
+                memberData("매수상위5합계") = memberResult.Top5BuyTotal
+                memberData("매도상위5합계") = memberResult.Top5SellTotal
+
+                Dim membersList As New List(Of Dictionary(Of String, Object))
+                For Each m As Cybos.StockMemberItem In memberResult.Members
+                    membersList.Add(New Dictionary(Of String, Object) From {
+                        {"순위", m.Rank},
+                        {"매도거래원", m.SellMemberName},
+                        {"매수거래원", m.BuyMemberName},
+                        {"매도수량", m.SellQty},
+                        {"매수수량", m.BuyQty}
+                    })
+                Next
+                memberData("거래원목록") = membersList
+
+                If supplyItems IsNot Nothing AndAlso supplyItems.Count > 0 AndAlso supplyItems(0).Volume > 0 Then
+                    memberData("매수집중도") = Math.Round(
+                        CDbl(memberResult.Top5BuyTotal) / CDbl(supplyItems(0).Volume), 4)
+                End If
+                keyframe("members") = memberData
+            Else
+                keyframe("members") = Nothing
+            End If
+
+            Await Task.Delay(200)
+
+            ' 3) 프로그램매매 시간대별 (최신 데이터)
+            Dim pgmItems As List(Of Cybos.ProgramTradeByTime) = Nothing
+            Await UiInvokeAsync(Sub()
+                                    pgmItems = _cybos.DownloadProgramTradeByTimeSync(cleanCode, "A")
+                                End Sub)
+
+            If pgmItems IsNot Nothing AndAlso pgmItems.Count > 0 Then
+                Dim latest = pgmItems(0)
+                keyframe("program") = New Dictionary(Of String, Object) From {
+                    {"시간", latest.Time},
+                    {"프로그램매수수량", latest.PgmBuyQty},
+                    {"프로그램매도수량", latest.PgmSellQty},
+                    {"프로그램순매수수량", latest.PgmNetQty},
+                    {"프로그램순매수수량증감", latest.PgmNetQtyChange},
+                    {"프로그램매수금액_천원", latest.PgmBuyAmt},
+                    {"프로그램매도금액_천원", latest.PgmSellAmt},
+                    {"프로그램순매수금액_천원", latest.PgmNetAmt},
+                    {"프로그램순매수금액증감_천원", latest.PgmNetAmtChange}
+                }
+            Else
+                keyframe("program") = Nothing
+            End If
+
+            Return ApiResponse.Ok(keyframe, $"키프레임 캡처 완료: {cleanCode}")
+        Catch ex As Exception
+            _logger.Errors($"[CaptureKeyframe] {ex.Message}")
+            Return ApiResponse.Err(ex.Message, 500)
+        End Try
+    End Function
+
+    '///////////MarketEye / StockMember / InvestorTrend / Keyframe 핸들러 삽입 완료/////
+
+
+
+    '$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+
+
+
+
+
+
 
 
     ' ----- TR Event Handler (The Brain) -----

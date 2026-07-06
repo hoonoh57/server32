@@ -162,7 +162,7 @@ Public Class RealtimeDataService
 
     Private Function HasValue(raw As String) As Boolean
         If String.IsNullOrWhiteSpace(raw) Then Return False
-        Dim trimmed = raw.Trim()
+        Dim trimmed As String = raw.Trim()
         Return Not (trimmed = "+" OrElse trimmed = "-")
     End Function
 
