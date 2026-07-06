@@ -169,6 +169,16 @@ Public Module ApiHelpDocs
         ' [22] 다음에 이어서 삽입
 
         sb.AppendLine()
+        sb.AppendLine("  [23-1] GET http://" & baseUrl & "/api/cybos/trade-strength-series?code={code}&count=150")
+        sb.AppendLine("       key            : cybos_trade_strength_series")
+        sb.AppendLine("       purpose        : Dscbo1.CpSvr8083 기반 시간대별 체결강도 추이 조회")
+        sb.AppendLine("       required query : code")
+        sb.AppendLine("       optional query : count (30, 60, 150, 360, 390 / default=150)")
+        sb.AppendLine("       data contract  : Data = Array<{ 시간, 체결강도_1일, 체결강도_5일, 체결강도_20일, 체결강도_60일, 현재가, 전일대비, 대비율, 거래량 }>")
+        sb.AppendLine("       sample success : { Success:true, Data:[{ 시간:'0905', 체결강도_1일:119.23, 현재가:15480, 거래량:123456 }] }")
+        sb.AppendLine("       notes          : CpSvr8083 count 매핑: 30=1, 60=2, 150=3, 360=4, 390=5.")
+
+        sb.AppendLine()
         sb.AppendLine("  [24] GET http://" & baseUrl & "/api/cybos/marketeye/supply?codes={005930;000660;035720}")
         sb.AppendLine("       key            : cybos_marketeye_supply")
         sb.AppendLine("       purpose        : 대신증권 MarketEye로 최대 200종목 수급 핵심지표 일괄 조회")

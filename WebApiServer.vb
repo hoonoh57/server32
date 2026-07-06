@@ -287,6 +287,17 @@ Public Class WebApiServer
                         resp = Resolve(_apiService.UnsubscribeProgramTradeAsync(codes))
                         ' ── 실시간 (Kiwoom) ──────────────────────
 
+                    Case "/api/cybos/trade-strength-series"
+                        ' 시간대별 체결강도 추이
+                        ' 사용: GET /api/cybos/trade-strength-series?code=005930&count=150
+                        Dim tsCode = req.QueryString("code")
+                        Dim tsCount = ParseIntQuery(req, "count", 150)
+
+                        If String.IsNullOrEmpty(tsCode) Then
+                            resp = ApiResponse.Err("code required", 400)
+                        Else
+                            resp = Resolve(_apiService.GetTradeStrengthSeriesAsync(tsCode.Trim(), tsCount))
+                        End If
 
                         '$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
 

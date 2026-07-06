@@ -14,17 +14,13 @@ Public Class KiwoomApiService
     Private ReadOnly _api As AxKHOpenAPILib.AxKHOpenAPI
     Private ReadOnly _logger As SimpleLogger
 
-    ' TR States: Key=RQName, Value=TaskCompletionSource returning (DataRows, PrevNext)
-    ' DataRows is List of Dictionary
-    ' PrevNext is String ("0" or "2")
     Private ReadOnly _pendingTr As New ConcurrentDictionary(Of String, TaskCompletionSource(Of TrResult))()
 
     Private _loginTcs As TaskCompletionSource(Of ApiResponse)
     Private _condLoadTcs As TaskCompletionSource(Of List(Of ConditionInfo))
     Private _condResultTcs As TaskCompletionSource(Of String())
+
     '///신규삽입
-    'Private ReadOnly _conditionRequestLock As New Object()
-    'Private Shared _conditionSearchScreenSeq As Integer = 9100
     Private Shared _conditionStreamScreenSeq As Integer = 9200
 
     Private _isLoggedIn As Boolean = False
@@ -266,17 +262,6 @@ Public Class KiwoomApiService
     End Sub
 
     ' ----- Conditions -----
-
-    '///신규추가(2026/07/06)
-    'Private Function NextConditionSearchScreen() As String
-    '    Dim seq As Integer = Threading.Interlocked.Increment(_conditionSearchScreenSeq)
-    '    If seq > 9199 Then
-    '        _conditionSearchScreenSeq = 9101
-    '        seq = 9101
-    '    End If
-    '    Return seq.ToString()
-    'End Function
-
     Private Function NextConditionStreamScreen() As String
         Dim seq As Integer = Threading.Interlocked.Increment(_conditionStreamScreenSeq)
         If seq > 9299 Then
@@ -300,14 +285,6 @@ Public Class KiwoomApiService
                End Function).
         ToArray()
     End Function
-
-    'Private Sub ClearConditionResultTcs(expected As TaskCompletionSource(Of String()))
-    '    SyncLock _conditionRequestLock
-    '        If Object.ReferenceEquals(_condResultTcs, expected) Then
-    '            _condResultTcs = Nothing
-    '        End If
-    '    End SyncLock
-    'End Sub
 
     Private Sub StopConditionSafe(screen As String, name As String, index As Integer)
         Try
@@ -432,69 +409,6 @@ Public Class KiwoomApiService
         End Try
     End Function
 
-    'Public Async Function SearchConditionAsync(name As String, index As Integer) As Task(Of ApiResponse)
-    '    If String.IsNullOrWhiteSpace(name) Then
-    '        Return ApiResponse.Err("Condition name is required", 400)
-    '    End If
-
-    '    Dim scr As String = GetNextConditionScreen()
-    '    Dim localTcs As New TaskCompletionSource(Of String())(TaskCreationOptions.RunContinuationsAsynchronously)
-
-    '    _condResultTcs = localTcs
-
-    '    Dim sendRet As Integer = -1
-
-    '    Try
-    '        sendRet = Await UiInvokeAsync(Function()
-    '                                          Return _api.SendCondition(scr, name, index, 0)
-    '                                      End Function)
-
-    '        If sendRet <> 1 Then
-    '            Return ApiResponse.Err($"SendCondition failed. name={name}, index={index}, screen={scr}, ret={sendRet}", 502)
-    '        End If
-
-    '        Dim done = Await Task.WhenAny(localTcs.Task, Task.Delay(30000))
-
-    '        If done IsNot localTcs.Task Then
-    '            Try
-    '                Await UiInvokeAsync(Sub() _api.SendConditionStop(scr, name, index))
-    '            Catch ex As Exception
-    '                _logger.Warn($"[Condition] SendConditionStop failed after timeout: {ex.Message}")
-    '            End Try
-
-    '            Return ApiResponse.Err($"SearchCondition Timeout. name={name}, index={index}, screen={scr}, ret={sendRet}", 504)
-    '        End If
-
-    '        Dim codes As String() = localTcs.Task.Result
-    '        If codes Is Nothing Then codes = Array.Empty(Of String)()
-
-    '        Dim payload = New With {
-    '        .Codes = codes,
-    '        .Stocks = New List(Of Dictionary(Of String, String))()
-    '    }
-
-    '        Try
-    '            Await UiInvokeAsync(Sub() _api.SendConditionStop(scr, name, index))
-    '        Catch ex As Exception
-    '            _logger.Warn($"[Condition] SendConditionStop failed after success: {ex.Message}")
-    '        End Try
-
-    '        Return ApiResponse.Ok(payload)
-
-    '    Catch ex As Exception
-    '        Try
-    '            Await UiInvokeAsync(Sub() _api.SendConditionStop(scr, name, index))
-    '        Catch
-    '        End Try
-
-    '        Return ApiResponse.Err($"SearchCondition exception. name={name}, index={index}, screen={scr}, ret={sendRet}, error={ex.Message}", 500)
-    '    Finally
-    '        If Object.ReferenceEquals(_condResultTcs, localTcs) Then
-    '            _condResultTcs = Nothing
-    '        End If
-    '    End Try
-    'End Function
-
     Private _conditionScreenSeq As Integer = 9100
 
     Private Function GetNextConditionScreen() As String
@@ -546,14 +460,6 @@ Public Class KiwoomApiService
         Return ApiResponse.Ok(payload, $"Condition stream started: {name} ({index}) @ {scr}")
     End Function
 
-
-
-    'Public Async Function StartConditionStreamAsync(name As String, index As Integer, screen As String) As Task(Of ApiResponse)
-    '    Dim scr = If(String.IsNullOrWhiteSpace(screen), "9001", screen)
-    '    Await UiInvokeAsync(Sub() _api.SendCondition(scr, name, index, 1))
-    '    Return ApiResponse.Ok(Nothing, $"Condition stream started: {name} ({index}) @ {scr}")
-    'End Function
-
     '///신규교체
     Public Function StopConditionStream(name As String, index As Integer, screen As String) As ApiResponse
         If String.IsNullOrWhiteSpace(name) Then
@@ -580,15 +486,6 @@ Public Class KiwoomApiService
             Return ApiResponse.Err($"StopConditionStream exception. name={name}, index={index}, screen={scr}, error={ex.Message}", 500)
         End Try
     End Function
-
-    'Public Function StopConditionStream(name As String, index As Integer, screen As String) As ApiResponse
-    '    Dim scr = If(String.IsNullOrWhiteSpace(screen), "9001", screen)
-    '    UiInvoke(Of Object)(Function()
-    '                            _api.SendConditionStop(scr, name, index)
-    '                            Return Nothing
-    '                        End Function)
-    '    Return ApiResponse.Ok(Nothing, $"Condition stream stopped: {name} ({index})")
-    'End Function
 
     Public Function GetDashboardSnapshot() As ApiResponse
         SyncLock _dashboardLock
@@ -1038,11 +935,6 @@ Public Class KiwoomApiService
         End Try
     End Sub
 
-    'Private Sub OnReceiveTrCondition(sender As Object, e As _DKHOpenAPIEvents_OnReceiveTrConditionEvent)
-    '    Dim codes = If(e.strCodeList, "").Split(";"c).Where(Function(s) s.Length > 0).ToArray()
-    '    _condResultTcs?.TrySetResult(codes)
-    'End Sub
-
     ' ----- Orders -----
     Public Async Function SendOrderAsync(req As OrderRequest) As Task(Of ApiResponse)
         Dim ret As Integer = -1
@@ -1123,21 +1015,6 @@ Public Class KiwoomApiService
             _cybosCandleSlots.Release()
         End Try
     End Function
-
-    'Private Shared Async Function RunCybosCandleRequestAsync(code As String,
-    '                                                        timeframe As String,
-    '                                                        fromDate As String,
-    '                                                        toDate As String) As Task(Of List(Of Candle))
-    '    Await _cybosCandleSlots.WaitAsync().ConfigureAwait(False)
-    '    Try
-    '        Return Await RunOnStaThreadAsync(Function()
-    '                                             Dim cybosClient As New Cybos()
-    '                                             Return cybosClient.DownloadCandlesByPeriod(code, timeframe, fromDate, toDate)
-    '                                         End Function).ConfigureAwait(False)
-    '    Finally
-    '        _cybosCandleSlots.Release()
-    '    End Try
-    'End Function
 
     Private Shared Function RunOnStaThreadAsync(Of T)(work As Func(Of T)) As Task(Of T)
         Dim tcs As New TaskCompletionSource(Of T)()
@@ -1415,10 +1292,58 @@ Public Class KiwoomApiService
     End Function
     '///////////프로그램 순매수정보 삽입 완료/////////////////////////////
 
-    '$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+    '/////////////체결강도 시작//////////////////////
+    ''' <summary>시간대별 체결강도 추이 (Dscbo1.CpSvr8083)</summary>
+    Public Async Function GetTradeStrengthSeriesAsync(code As String, count As Integer) As Task(Of ApiResponse)
+        Try
+            If String.IsNullOrWhiteSpace(code) Then
+                Return ApiResponse.Err("code required", 400)
+            End If
+
+            Dim normalizedCount As Integer = count
+            If normalizedCount <> 30 AndAlso
+               normalizedCount <> 60 AndAlso
+               normalizedCount <> 150 AndAlso
+               normalizedCount <> 360 AndAlso
+               normalizedCount <> 390 Then
+                normalizedCount = 150
+            End If
+
+            Dim items As List(Of Cybos.TradeStrengthSeriesItem) = Nothing
+
+            Await UiInvokeAsync(Sub()
+                                    items = _cybos.FetchTradeStrengthSeries(code.Trim(), normalizedCount)
+                                End Sub)
+
+            If items Is Nothing Then items = New List(Of Cybos.TradeStrengthSeriesItem)
+
+            Dim result As New List(Of Dictionary(Of String, Object))
+            For Each item As Cybos.TradeStrengthSeriesItem In items
+                Dim d As New Dictionary(Of String, Object)
+                d("시간") = item.Time
+                d("체결강도_1일") = item.Strength1Day
+                d("체결강도_5일") = item.Strength5Day
+                d("체결강도_20일") = item.Strength20Day
+                d("체결강도_60일") = item.Strength60Day
+                d("현재가") = item.Price
+                d("전일대비") = item.Change
+                d("대비율") = item.ChangeRate
+                d("거래량") = item.Volume
+                result.Add(d)
+            Next
+
+            Return ApiResponse.Ok(result, $"체결강도추이 {items.Count}건")
+
+        Catch ex As Exception
+            _logger.Errors($"[GetTradeStrengthSeries] {ex.Message}")
+            Return ApiResponse.Err(ex.Message, 500)
+        End Try
+    End Function
+
+
+    '/////////////체결강도 종료//////////////////////
 
     '///////////MarketEye / StockMember / InvestorTrend / Keyframe 핸들러 삽입 시작/////
-
     ''' <summary>MarketEye 일괄 수급 조회 (최대 200종목)</summary>
     Public Async Function GetMarketEyeSupplyAsync(codes As String()) As Task(Of ApiResponse)
         Try

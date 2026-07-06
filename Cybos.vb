@@ -667,6 +667,98 @@ Public Class Cybos
 
     '$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
 
+    '////////////////////////체결강도////////////////////////
+    ' ============================================================
+    '  시간대별 체결강도 추이 데이터 모델 (Dscbo1.CpSvr8083)
+    ' ============================================================
+    Public Class TradeStrengthSeriesItem
+        Public Property Time As String
+        Public Property Strength1Day As Decimal
+        Public Property Strength5Day As Decimal
+        Public Property Strength20Day As Decimal
+        Public Property Strength60Day As Decimal
+        Public Property Price As Decimal
+        Public Property Change As Decimal
+        Public Property ChangeRate As Decimal
+        Public Property Volume As Long
+    End Class
+    ' ============================================================
+    '  시간대별 체결강도 추이 (Dscbo1.CpSvr8083)
+    '  count: 30/60/150/360/390 -> 1/2/3/4/5
+    ' ============================================================
+    Public Function FetchTradeStrengthSeries(stockCode As String, count As Integer) As List(Of TradeStrengthSeriesItem)
+        Dim result As New List(Of TradeStrengthSeriesItem)
+
+        If String.IsNullOrWhiteSpace(stockCode) Then Return result
+
+        Dim countFlag As String = "3"
+        Select Case count
+            Case 30
+                countFlag = "1"
+            Case 60
+                countFlag = "2"
+            Case 150
+                countFlag = "3"
+            Case 360
+                countFlag = "4"
+            Case 390
+                countFlag = "5"
+            Case Else
+                countFlag = "3"
+        End Select
+
+        Try
+            Dim code As String = EnsurePrefix(stockCode)
+            Dim objRq As New DSCBO1Lib.CpSvr8083()
+
+            objRq.SetInputValue(0, code)
+            objRq.SetInputValue(1, AscW(countFlag(0)))
+
+            Dim ret As Integer = CInt(objRq.BlockRequest())
+            If ret <> 0 Then
+                Debug.Print($"CpSvr8083 BlockRequest 오류: {ret}")
+                Return result
+            End If
+
+            Dim status As Integer = objRq.GetDibStatus()
+            If status <> 0 Then
+                Debug.Print($"CpSvr8083 오류: status={status}, msg={objRq.GetDibMsg1()}")
+                Return result
+            End If
+
+            Dim rowCount As Integer = CInt(objRq.GetHeaderValue(0))
+
+            For i As Integer = 0 To rowCount - 1
+                Dim rawTime As String = SafeStr(objRq.GetDataValue(0, i))
+                Dim hhmm As String = rawTime.PadLeft(4, "0"c)
+
+                Dim item As New TradeStrengthSeriesItem With {
+                    .Time = hhmm,
+                    .Strength1Day = CDec(SafeSng(objRq.GetDataValue(1, i))),
+                    .Strength5Day = CDec(SafeSng(objRq.GetDataValue(2, i))),
+                    .Strength20Day = CDec(SafeSng(objRq.GetDataValue(3, i))),
+                    .Strength60Day = CDec(SafeSng(objRq.GetDataValue(4, i))),
+                    .Price = CDec(SafeSng(objRq.GetDataValue(5, i))),
+                    .Change = CDec(SafeSng(objRq.GetDataValue(6, i))),
+                    .ChangeRate = CDec(SafeSng(objRq.GetDataValue(7, i))),
+                    .Volume = SafeLng(objRq.GetDataValue(8, i))
+                }
+
+                result.Add(item)
+            Next
+
+            Debug.Print($"CpSvr8083 {code}: count={count}, flag={countFlag}, rows={result.Count}")
+
+        Catch ex As Exception
+            Debug.Print($"CpSvr8083 예외: {ex.Message}")
+        End Try
+
+        Return result
+    End Function
+
+
+    '////////////////////////체결강도////////////////////////
+
     ' ============================================================
     '  MarketEye 데이터 모델
     ' ============================================================
