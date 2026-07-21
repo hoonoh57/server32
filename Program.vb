@@ -5,6 +5,7 @@ Public Module Program
     <HandleProcessCorruptedStateExceptions>
     Public Sub Main()
         Try
+            KiwoomTextEncoding.VerifyOrThrow()
             Application.EnableVisualStyles()
             Application.SetCompatibleTextRenderingDefault(False)
 
@@ -26,7 +27,7 @@ Public Module Program
             Dim exeHub As New ExecutionHub(form.ApiControl, logger, apiSvc)
             Dim web As New WebApiServer(apiSvc, rtSvc, exeHub, logger)
 
-            ' ¡Ú ÇÁ·Î±×·¥¸Å¸Å ½Ç½Ã°£ ¡æ WebSocket Áß°è ¿¬°á
+            ' â˜… í”„ë¡œê·¸ëž¨ë§¤ë§¤ ì‹¤ì‹œê°„ â†’ WebSocket ì¤‘ê³„ ì—°ê²°
             apiSvc.InitProgramTradeRealtimeBroadcast(rtSvc)
 
             Dim portStr As String = System.Configuration.ConfigurationManager.AppSettings("Port")
@@ -47,3 +48,4 @@ Public Module Program
         End Try
     End Sub
 End Module
+
