@@ -21,18 +21,14 @@
 
 ### 빌드 단계 (터미널)
 
-1. **NuGet 패키지 복원**
+1. **빌드**
    ```cmd
-   nuget install packages.config -OutputDirectory packages
+   build.bat
    ```
 
-2. **빌드**
-   ```cmd
-   "C:\Windows\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe" KiwoomServer.vbproj /p:Configuration=Debug /p:Platform=AnyCPU
-   ```
-   *(참고: 최신 Visual Studio가 설치되어 있다면 `MSBuild.exe` 위치가 다를 수 있습니다. 예: `C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe`)*
+   빌드 스크립트가 NuGet 패키지를 복원하고, 설치된 키움 OpenAPI와 CYBOS Plus에서 필요한 32비트 interop DLL을 자동 생성한 뒤 x86으로 컴파일합니다. 생성된 DLL과 패키지는 저장소에 커밋하지 않습니다.
 
-3. **실행**
+2. **실행**
    ```cmd
    bin\Debug\KiwoomServer.exe
    ```

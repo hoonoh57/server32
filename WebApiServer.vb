@@ -83,8 +83,8 @@ Public Class WebApiServer
             Dim port As Integer = New Uri(url).Port
             _httpServer = New HttpServer(port)
 
-            _httpServer.AddWebSocketService(Of RealtimeWebSocketBehavior)("/ws/realtime", Function() New RealtimeWebSocketBehavior(_realtimeService))
-            _httpServer.AddWebSocketService(Of ExecutionWebSocketBehavior)("/ws/execution", Function() New ExecutionWebSocketBehavior(_execHub))
+            _httpServer.AddWebSocketService(Of RealtimeWebSocketBehavior)("/ws/realtime", Sub(behavior) behavior.Service = _realtimeService)
+            _httpServer.AddWebSocketService(Of ExecutionWebSocketBehavior)("/ws/execution", Sub(behavior) behavior.Hub = _execHub)
 
             AddHandler _httpServer.OnGet, AddressOf ProcessApiRequest
             AddHandler _httpServer.OnPost, AddressOf ProcessApiRequest

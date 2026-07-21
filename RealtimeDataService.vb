@@ -7,16 +7,24 @@ Imports WebSocketSharp.Server
 
 Public Class RealtimeWebSocketBehavior
     Inherits WebSocketBehavior
-    Private ReadOnly _svc As RealtimeDataService
-    Public Sub New(svc As RealtimeDataService)
-        _svc = svc
-    End Sub
+    Public Property Service As RealtimeDataService
+
     Protected Overrides Sub OnOpen()
-        _svc.AddSession(ID, Me)
+        If Service IsNot Nothing Then Service.AddSession(ID, Me)
     End Sub
     Protected Overrides Sub OnClose(e As CloseEventArgs)
-        _svc.RemoveSession(ID)
+        If Service IsNot Nothing Then Service.RemoveSession(ID)
     End Sub
+
+    Public Function TrySendMessage(message As String) As Boolean
+        Try
+            If ReadyState <> WebSocketState.Open Then Return False
+            Send(message)
+            Return True
+        Catch
+            Return False
+        End Try
+    End Function
 End Class
 
 Public Class RealtimeDataService
@@ -273,26 +281,10 @@ Public Class RealtimeDataService
         For Each entry As KeyValuePair(Of String, RealtimeWebSocketBehavior) In _sessions.ToArray()
             Dim sessionId = entry.Key
             Dim sess = entry.Value
-            Dim ws As WebSocket = Nothing
-            If sess IsNot Nothing AndAlso sess.Context IsNot Nothing Then
-                ws = sess.Context.WebSocket
-            End If
-            If ws Is Nothing Then
+            If sess Is Nothing OrElse Not sess.TrySendMessage(jsonStr) Then
                 RemoveSession(sessionId)
                 Continue For
             End If
-            If ws.ReadyState <> WebSocketState.Open Then
-                RemoveSession(sessionId)
-                Continue For
-            End If
-            Try
-                ws.Send(jsonStr)
-            Catch ex As Exception
-                If _logger IsNot Nothing Then
-                    _logger.Warn($"[RT] Send failed ({sessionId}): {ex.Message}")
-                End If
-                RemoveSession(sessionId)
-            End Try
         Next
     End Sub
     ''' <summary>
@@ -307,16 +299,10 @@ Public Class RealtimeDataService
             Dim sessionId = entry.Key
             Dim sess = entry.Value
             Try
-                If sess Is Nothing OrElse sess.Context Is Nothing Then
+                If sess Is Nothing OrElse Not sess.TrySendMessage(jsonStr) Then
                     RemoveSession(sessionId)
                     Continue For
                 End If
-                Dim ws = sess.Context.WebSocket
-                If ws Is Nothing OrElse ws.ReadyState <> WebSocketState.Open Then
-                    RemoveSession(sessionId)
-                    Continue For
-                End If
-                ws.Send(jsonStr)
             Catch ex As ObjectDisposedException
                 RemoveSession(sessionId)
             Catch ex As Exception

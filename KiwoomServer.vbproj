@@ -14,7 +14,8 @@
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <PlatformTarget>AnyCPU</PlatformTarget>
+    <PlatformTarget>x86</PlatformTarget>
+    <Prefer32Bit>true</Prefer32Bit>
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <DefineDebug>true</DefineDebug>
@@ -23,7 +24,8 @@
     <NoWarn>42016,41999,42017,42018,42019,42032,42036,42020,42021,42022</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <PlatformTarget>AnyCPU</PlatformTarget>
+    <PlatformTarget>x86</PlatformTarget>
+    <Prefer32Bit>true</Prefer32Bit>
     <DebugType>pdbonly</DebugType>
     <DefineDebug>false</DefineDebug>
     <DefineTrace>true</DefineTrace>
@@ -33,15 +35,15 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Interop.CPSYSDIBLib">
-      <HintPath>..\..\library\Interop.CPSYSDIBLib.dll</HintPath>
+      <HintPath>lib\interop\Interop.CPSYSDIBLib.dll</HintPath>
       <EmbedInteropTypes>True</EmbedInteropTypes>
     </Reference>
     <Reference Include="Interop.CPUTILLib">
-      <HintPath>..\..\library\Interop.CPUTILLib.dll</HintPath>
+      <HintPath>lib\interop\Interop.CPUTILLib.dll</HintPath>
       <EmbedInteropTypes>True</EmbedInteropTypes>
     </Reference>
     <Reference Include="Interop.DSCBO1Lib">
-      <HintPath>..\..\library\Interop.DSCBO1Lib.dll</HintPath>
+      <HintPath>lib\interop\Interop.DSCBO1Lib.dll</HintPath>
       <EmbedInteropTypes>True</EmbedInteropTypes>
     </Reference>
     <Reference Include="Newtonsoft.Json">
@@ -53,7 +55,7 @@
     <Reference Include="System.Core" />
     <Reference Include="System.Configuration" />
     <Reference Include="System.Xml" />
-    <Reference Include="websocket-sharp, Version=1.0.2.32519, Culture=neutral, PublicKeyToken=5660b08a1845a91e, processorArchitecture=MSIL">
+    <Reference Include="websocket-sharp">
       <HintPath>packages\WebSocketSharp-NonPreRelease.1.0.0\lib\net35\websocket-sharp.dll</HintPath>
     </Reference>
   </ItemGroup>
@@ -92,11 +94,11 @@
   </ItemGroup>
   <ItemGroup>
     <Reference Include="AxInterop.KHOpenAPILib">
-      <HintPath>bin\Debug\AxInterop.KHOpenAPILib.dll</HintPath>
+      <HintPath>lib\interop\AxInterop.KHOpenAPILib.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="Interop.KHOpenAPILib">
-      <HintPath>bin\Debug\Interop.KHOpenAPILib.dll</HintPath>
+    <Reference Include="KHOpenAPILib">
+      <HintPath>lib\interop\KHOpenAPILib.dll</HintPath>
       <EmbedInteropTypes>False</EmbedInteropTypes>
       <Private>True</Private>
     </Reference>
@@ -106,17 +108,6 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <None Include="packages.config" />
-  </ItemGroup>
-  <ItemGroup>
-    <COMReference Include="CPSYSDIBLib">
-      <Guid>{9C31B76A-7189-49A3-9781-3C6DD6ED5AD3}</Guid>
-      <VersionMajor>1</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>False</Isolated>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </COMReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.VisualBasic.targets" />
 </Project>

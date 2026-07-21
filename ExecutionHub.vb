@@ -8,19 +8,25 @@ Imports WebSocketSharp.Server
 Public Class ExecutionWebSocketBehavior
     Inherits WebSocketBehavior
 
-    Private ReadOnly _hub As ExecutionHub
-
-    Public Sub New(hub As ExecutionHub)
-        _hub = hub
-    End Sub
+    Public Property Hub As ExecutionHub
 
     Protected Overrides Sub OnOpen()
-        _hub.Add(ID, Me)
+        If Hub IsNot Nothing Then Hub.Add(ID, Me)
     End Sub
 
     Protected Overrides Sub OnClose(e As CloseEventArgs)
-        _hub.Remove(ID)
+        If Hub IsNot Nothing Then Hub.Remove(ID)
     End Sub
+
+    Public Function TrySendMessage(message As String) As Boolean
+        Try
+            If ReadyState <> WebSocketState.Open Then Return False
+            Send(message)
+            Return True
+        Catch
+            Return False
+        End Try
+    End Function
 End Class
 
 Public Class ExecutionHub
@@ -105,10 +111,7 @@ Public Class ExecutionHub
 
     Private Sub Broadcast(msg As String)
         For Each s As ExecutionWebSocketBehavior In _sessions.Values
-            Try
-                s.Context.WebSocket.Send(msg)
-            Catch
-            End Try
+            If s IsNot Nothing Then s.TrySendMessage(msg)
         Next
     End Sub
 
@@ -154,10 +157,7 @@ Public Class ExecutionHub
         Dim jsonStr As String = JsonConvert.SerializeObject(payload)
 
         If target IsNot Nothing Then
-            Try
-                target.Context.WebSocket.Send(jsonStr)
-            Catch
-            End Try
+            target.TrySendMessage(jsonStr)
         Else
             If _lastDashboardPayload IsNot Nothing AndAlso _lastDashboardPayload = jsonStr Then
                 Return
