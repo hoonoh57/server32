@@ -1,0 +1,10 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+
+[*.{vb,vbproj,sln,config,xml,json,md,ps1,bat}]
+charset = utf-8
+
