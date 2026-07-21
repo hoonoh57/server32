@@ -1,0 +1,11 @@
+* text=auto
+*.vb text working-tree-encoding=UTF-8
+*.vbproj text working-tree-encoding=UTF-8
+*.sln text working-tree-encoding=UTF-8
+*.config text working-tree-encoding=UTF-8
+*.xml text working-tree-encoding=UTF-8
+*.json text working-tree-encoding=UTF-8
+*.md text working-tree-encoding=UTF-8
+*.ps1 text working-tree-encoding=UTF-8
+*.bat text working-tree-encoding=UTF-8
+
