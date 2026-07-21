@@ -3,6 +3,13 @@ setlocal EnableExtensions
 
 echo [KiwoomServer Builder]
 
+echo 0. Verifying repository text encoding...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\scripts\check_encoding.ps1"
+if errorlevel 1 (
+    echo [Error] Encoding verification failed.
+    exit /b 1
+)
+
 set "MSBUILD_PATH="
 set "SDK_TOOLS=C:\Program Files (x86)\Microsoft SDKs\Windows\v10.0A\bin\NETFX 4.8 Tools"
 set "AXIMP_PATH=%SDK_TOOLS%\AxImp.exe"
@@ -60,3 +67,4 @@ echo.
 echo [Build Success]
 echo Run bin\Debug\KiwoomServer.exe to start.
 exit /b 0
+
