@@ -311,14 +311,18 @@ Public Class KiwoomApiService
         Try
             Dim raw = UiInvoke(Function() _api.GetConditionNameList())
             Dim list As New List(Of ConditionInfo)
+            Dim normalizedCount As Integer = 0
             If Not String.IsNullOrEmpty(raw) Then
                 For Each s As String In raw.Split(";"c)
                     Dim parts = s.Split("^"c)
                     If parts.Length >= 2 Then
-                        list.Add(New ConditionInfo With {.Index = CInt(parts(0)), .Name = parts(1)})
+                        Dim normalizedName = KiwoomTextEncoding.NormalizeKorean(parts(1))
+                        If KiwoomTextEncoding.WasNormalized(parts(1), normalizedName) Then normalizedCount += 1
+                        list.Add(New ConditionInfo With {.Index = CInt(parts(0)), .Name = normalizedName})
                     End If
                 Next
             End If
+            _logger.Info($"[Encoding] Kiwoom condition names normalized at COM boundary: {normalizedCount}/{list.Count}")
             _condLoadTcs?.TrySetResult(list)
         Catch ex As Exception
             _condLoadTcs?.TrySetException(ex)
@@ -330,6 +334,8 @@ Public Class KiwoomApiService
         If String.IsNullOrWhiteSpace(name) Then
             Return ApiResponse.Err("Condition name is required", 400)
         End If
+
+        name = KiwoomTextEncoding.NormalizeKorean(name.Trim())
 
         Dim cachedCodes As String() = Nothing
         If TryGetConditionCache(name, index, cachedCodes) Then
@@ -364,7 +370,7 @@ Public Class KiwoomApiService
             If sendRet <> 1 Then
                 ClearConditionResultTcs(localTcs)
                 Return ApiResponse.Err(
-                $"SendCondition failed. name={name}, index={index}, screen={scr}, ret={sendRet}. Possible Kiwoom screen reuse/state issue.",
+                $"SendCondition failed. index={index}, screen={scr}, ret={sendRet}. Possible Kiwoom screen reuse/state issue.",
                 502)
             End If
 
@@ -1768,3 +1774,4 @@ Public Class KiwoomApiService
         Return New KiwoomStatusData With {.IsLoggedIn = _isLoggedIn, .AccountNo = _accountNo}
     End Function
 End Class
+
