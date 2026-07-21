@@ -18,7 +18,6 @@ Public Class RealtimeWebSocketBehavior
 
     Public Function TrySendMessage(message As String) As Boolean
         Try
-            If ReadyState <> WebSocketState.Open Then Return False
             Send(message)
             Return True
         Catch
