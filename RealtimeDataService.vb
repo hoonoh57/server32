@@ -107,6 +107,15 @@ Public Class RealtimeDataService
         Dim rawCum = _api.GetCommRealData(realType, 13)
         If HasValue(rawCum) Then dataMap("cum_volume") = ParseLong(rawCum)
 
+        ' 키움 FID 14는 당일 누적거래대금이며 단위는 백만원이다.
+        ' 구독을 시작한 시점부터 체결가×체결량을 다시 합산하면 장중 늦게
+        ' 포착된 종목의 50억/100억 최초 돌파시각을 재현할 수 없으므로,
+        ' 반드시 키움이 제공하는 세션 누적값을 원본 그대로 전달한다.
+        Dim rawCumTurnover = _api.GetCommRealData(realType, 14)
+        If HasValue(rawCumTurnover) Then
+            dataMap("cum_turnover_million") = ParseLong(rawCumTurnover)
+        End If
+
         Dim typeName As String = If(realType, String.Empty)
         If typeName.Contains("체결") Then
             stdType = "tick"
@@ -315,3 +324,4 @@ Public Class RealtimeDataService
 
 
 End Class
+
