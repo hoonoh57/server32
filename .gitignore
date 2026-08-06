@@ -55,12 +55,16 @@ Desktop.ini
 .DS_Store
 
 # ===== 설정/민감정보 =====
+.env
+.env.*
+!.env.example
 *.config.local
 appsettings.*.json
 !appsettings.json
 secrets.json
 
-# ② .gitignore에 __pycache__ 추가 (빠져있었으므로)
+# ===== Python =====
+__pycache__/
 *.pyc
 *.pyo
 *.pyc.*
