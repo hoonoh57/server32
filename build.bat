@@ -33,14 +33,12 @@ for %%F in ("%AXIMP_PATH%" "%TLBIMP_PATH%" "C:\OpenAPI\khopenapi.ocx" "C:\Daishi
     )
 )
 
-echo 1. Restoring NuGet packages...
-if exist "packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll" if exist "packages\WebSocketSharp-NonPreRelease.1.0.0\lib\net35\websocket-sharp.dll" goto packages_ready
-"%MSBUILD_PATH%" KiwoomServer.sln /t:Restore /p:RestorePackagesConfig=true
+echo 1. Restoring managed NuGet packages...
+"%MSBUILD_PATH%" KiwoomServer.sln /t:Restore
 if errorlevel 1 (
-    echo [Error] NuGet package restore failed.
+    echo [Error] NuGet PackageReference restore failed.
     exit /b 1
 )
-:packages_ready
 
 echo.
 echo 2. Generating 32-bit broker interop assemblies...
@@ -65,6 +63,6 @@ if errorlevel 1 (
 
 echo.
 echo [Build Success]
+echo Managed MySqlConnector was restored through NuGet; no native vcpkg build is used.
 echo Run bin\Debug\KiwoomServer.exe to start.
 exit /b 0
-
