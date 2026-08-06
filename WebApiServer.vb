@@ -16,13 +16,8 @@ Public Class WebApiServer
     Private _baseUrl As String = "http://localhost:8082"
     Private Const DefaultRealtimeFids As String = "10;11;12;13;15;16;17;18;20;41;42;43;44;45;51;52;53;54;55;61;62;63;64;65;71;72;73;74;75;121;125;228"
 
-    ' ── 종목명↔코드 변환용 CpStockCode ──
-    '///Private ReadOnly _stockCode As New CPUTILLib.CpStockCode
-    ' ── 종목명↔코드 변환용 CpStockCode: 서버 시작 시 생성 금지, 필요 시 lazy 생성 ──
     Private _stockCode As CPUTILLib.CpStockCode = Nothing
     Private ReadOnly _stockCodeLock As New Object()
-
-
 
     Public Sub New(apiSvc As KiwoomApiService, rtSvc As RealtimeDataService, execHub As ExecutionHub, logger As SimpleLogger)
         _apiService = apiSvc
@@ -38,17 +33,6 @@ Public Class WebApiServer
         If Integer.TryParse(raw, parsed) Then Return parsed
         Return defaultValue
     End Function
-
-    '''' <summary>
-    '''' 종목명 → 종목코드 (A접두사 제거, 못찾으면 빈문자열)
-    '''' </summary>
-    'Public Function GetStockCode(stockName As String) As String
-    '    Dim code As String = _stockCode.NameToCode(stockName)
-    '    If code <> "" Then
-    '        Return code.Substring(1)   ' "A106450" → "106450"
-    '    End If
-    '    Return ""
-    'End Function
 
     Public Function GetStockCode(stockName As String) As String
         If String.IsNullOrWhiteSpace(stockName) Then Return ""
@@ -68,14 +52,11 @@ Public Class WebApiServer
 
                 Return code
             End SyncLock
-
         Catch ex As Exception
             Debug.Print("[GetStockCode] CpStockCode 실패: " & ex.Message)
             Return ""
         End Try
     End Function
-
-
 
     Public Sub Start(url As String)
         Try
@@ -109,7 +90,6 @@ Public Class WebApiServer
 
         _logger.Info($"[API] {req.HttpMethod} {path}")
 
-        ' CORS
         Try
             res.Headers.Add("Access-Control-Allow-Origin", "*")
             res.Headers.Add("Access-Control-Allow-Headers", "content-type")
@@ -123,7 +103,6 @@ Public Class WebApiServer
             Return
         End If
 
-        ' Help HTML (별도 처리)
         If req.HttpMethod = "GET" AndAlso (path = "/help" OrElse path = "/help/realtime") Then
             Try
                 Dim wsBase = $"ws://localhost:{New Uri(_baseUrl).Port}"
@@ -139,9 +118,7 @@ Public Class WebApiServer
 
         Try
             If req.HttpMethod = "GET" Then
-
                 Select Case path
-
                     Case "/api/help"
                         Dim wsBase = $"ws://localhost:{New Uri(_baseUrl).Port}"
                         resp = ApiResponse.Ok(ApiHelpDocs.BuildApiHelp(_baseUrl, wsBase, DefaultRealtimeFids))
@@ -218,7 +195,7 @@ Public Class WebApiServer
                         Dim tick = If(req.QueryString("tick"), "1")
                         Dim stopTime = req.QueryString("stopTime")
                         If String.IsNullOrEmpty(stopTime) Then
-                            stopTime = Util.GetAdjustedPreviousDate & "140000" 'DateTime.Now.AddDays(-1).ToString("yyyyMMdd") & "090000"
+                            stopTime = Util.GetAdjustedPreviousDate & "140000"
                         End If
                         resp = Resolve(_apiService.GetMinuteCandlesAsync(code, CInt(tick), stopTime))
 
@@ -248,8 +225,6 @@ Public Class WebApiServer
                                 resp = ApiResponse.Err($"'{stockName}' 종목코드 미발견")
                             End If
                         End If
-
-                        ' ── 프로그램매매 ──────────────────────────
 
                     Case "/api/market/program/time"
                         Dim code = req.QueryString("code")
@@ -289,27 +264,17 @@ Public Class WebApiServer
                             codes = codesRaw.Split({";"c, ","c}, StringSplitOptions.RemoveEmptyEntries)
                         End If
                         resp = Resolve(_apiService.UnsubscribeProgramTradeAsync(codes))
-                        ' ── 실시간 (Kiwoom) ──────────────────────
 
                     Case "/api/cybos/trade-strength-series"
-                        ' 시간대별 체결강도 추이
-                        ' 사용: GET /api/cybos/trade-strength-series?code=005930&count=150
                         Dim tsCode = req.QueryString("code")
                         Dim tsCount = ParseIntQuery(req, "count", 150)
-
                         If String.IsNullOrEmpty(tsCode) Then
                             resp = ApiResponse.Err("code required", 400)
                         Else
                             resp = Resolve(_apiService.GetTradeStrengthSeriesAsync(tsCode.Trim(), tsCount))
                         End If
 
-                        '$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
-
-                       ' ── 대신증권 수급 분석 (MarketEye / StockMember / 투자자동향 / Keyframe) ──
-
                     Case "/api/cybos/marketeye/supply"
-                        ' 최대 200종목 수급 일괄 조회
-                        ' 사용: GET /api/cybos/marketeye/supply?codes=005930;000660;035720
                         Dim codesRaw2 = req.QueryString("codes")
                         If String.IsNullOrEmpty(codesRaw2) Then
                             resp = ApiResponse.Err("codes required (semicolon separated)", 400)
@@ -319,8 +284,6 @@ Public Class WebApiServer
                         End If
 
                     Case "/api/cybos/member/top5"
-                        ' 단일 종목 5대 매매창구 조회
-                        ' 사용: GET /api/cybos/member/top5?code=005930
                         Dim mCode = req.QueryString("code")
                         If String.IsNullOrEmpty(mCode) Then
                             resp = ApiResponse.Err("code required", 400)
@@ -329,8 +292,6 @@ Public Class WebApiServer
                         End If
 
                     Case "/api/cybos/member/batch"
-                        ' 복수 종목 5대 창구 일괄 조회
-                        ' 사용: GET /api/cybos/member/batch?codes=005930;000660;035720
                         Dim bCodesRaw = req.QueryString("codes")
                         If String.IsNullOrEmpty(bCodesRaw) Then
                             resp = ApiResponse.Err("codes required", 400)
@@ -340,8 +301,6 @@ Public Class WebApiServer
                         End If
 
                     Case "/api/cybos/investor/trend"
-                        ' 투자자별 매매동향(잠정) 조회
-                        ' 사용: GET /api/cybos/investor/trend?type=2&market=0&value=0&sort=0
                         Dim investType = ParseIntQuery(req, "type", 2)
                         Dim mktType = If(req.QueryString("market"), "0")
                         Dim valType = If(req.QueryString("value"), "0")
@@ -349,20 +308,12 @@ Public Class WebApiServer
                         resp = Resolve(_apiService.GetInvestorTrendAsync(investType, mktType, valType, srtOrder))
 
                     Case "/api/cybos/keyframe/capture"
-                        ' 키프레임 통합 캡처 (MarketEye + 5대창구 + 프로그램매매)
-                        ' 사용: GET /api/cybos/keyframe/capture?code=005930
                         Dim kfCode = req.QueryString("code")
                         If String.IsNullOrEmpty(kfCode) Then
                             resp = ApiResponse.Err("code required", 400)
                         Else
                             resp = Resolve(_apiService.CaptureKeyframeAsync(kfCode.Trim()))
                         End If
-                        '$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
-
-
-
-
-
 
                     Case "/api/realtime/subscribe"
                         Dim codes = req.QueryString("codes")
@@ -383,12 +334,10 @@ Public Class WebApiServer
 
                     Case Else
                         resp = ApiResponse.Err("Not Found", 404)
-
                 End Select
 
             ElseIf req.HttpMethod = "POST" Then
-
-                Using r As New StreamReader(CType(req.InputStream, Stream))
+                Using r As New StreamReader(CType(req.InputStream, Stream), Encoding.UTF8)
                     Dim body As String = r.ReadToEnd()
 
                     If path = "/api/orders" Then
@@ -397,6 +346,16 @@ Public Class WebApiServer
 
                     ElseIf path = "/api/auth/login" Then
                         resp = Resolve(_apiService.LoginAsync())
+
+                    ElseIf path = "/api/stock-pool/symbols/resolve" Then
+                        Dim request = JsonConvert.DeserializeObject(Of StockPoolResolveRequest)(body)
+                        Dim repository As New StockPoolRepository(_logger)
+                        resp = repository.ResolveSymbols(request)
+
+                    ElseIf path = "/api/stock-pool/cohorts" Then
+                        Dim request = JsonConvert.DeserializeObject(Of StockPoolCohortCreateRequest)(body)
+                        Dim repository As New StockPoolRepository(_logger)
+                        resp = repository.CreateCohort(request)
 
                     ElseIf path = "/api/market/names_to_codes" Then
                         Try
@@ -421,22 +380,18 @@ Public Class WebApiServer
                         Catch ex As Exception
                             resp = ApiResponse.Err("JSON 파싱 오류: " & ex.Message)
                         End Try
-
                     Else
                         resp = ApiResponse.Err("Not Found", 404)
                     End If
                 End Using
-
             Else
                 resp = ApiResponse.Err("Method Not Allowed", 405)
             End If
-
         Catch ex As Exception
             _logger.Errors($"[API] Error processing {path}: {ex.Message}")
             resp = ApiResponse.Err(ex.Message, 500)
         End Try
 
-        ' ── 응답 전송 (클라이언트 이탈 방어) ──
         If resp Is Nothing Then resp = ApiResponse.Err("Not Found", 404)
 
         Try
@@ -449,11 +404,10 @@ Public Class WebApiServer
             _logger.Warn($"[HTTP] Response send error ({path}): {ex.Message}")
         End Try
     End Sub
+
     Private Shared Function Resolve(Of T)(tt As Task(Of T)) As T
         Return tt.ConfigureAwait(False).GetAwaiter().GetResult()
     End Function
-
-    ' WebApiServer.vb — WriteRawResponse 수정
 
     Private Sub WriteRawResponse(res As HttpListenerResponse, contentType As String, buf As Byte(), statusCode As Integer)
         If res Is Nothing Then Return
@@ -520,7 +474,4 @@ Public Class WebApiServer
             Debug.Print($"[WriteRawResponse] 응답 close 예외: {ex.Message}")
         End Try
     End Sub
-
-
-
 End Class
