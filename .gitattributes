@@ -1,11 +1,13 @@
+# Repository text files are already stored as UTF-8.
+# Do not apply working-tree-encoding=UTF-8: on Git for Windows it can make
+# UTF-8/BOM files appear modified immediately after checkout or reset.
 * text=auto
-*.vb text working-tree-encoding=UTF-8
-*.vbproj text working-tree-encoding=UTF-8
-*.sln text working-tree-encoding=UTF-8
-*.config text working-tree-encoding=UTF-8
-*.xml text working-tree-encoding=UTF-8
-*.json text working-tree-encoding=UTF-8
-*.md text working-tree-encoding=UTF-8
-*.ps1 text working-tree-encoding=UTF-8
-*.bat text working-tree-encoding=UTF-8
-
+*.vb text
+*.vbproj text
+*.sln text
+*.config text
+*.xml text
+*.json text
+*.md text
+*.ps1 text
+*.bat text
