@@ -1,9 +1,18 @@
+[CmdletBinding()]
 param(
     [string]$BaseUrl = "http://127.0.0.1:8082",
-    [string[]]$Names = @("아로마티카", "져스텍", "금호타이어")
+    [string[]]$Names = @()
 )
 
 $ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+# Keep this script ASCII-only so Windows PowerShell 5.1 can parse it
+# regardless of BOM handling. ConvertFrom-Json decodes the Unicode names.
+if ($Names.Count -eq 0) {
+    $defaultNamesJson = '["\uC544\uB85C\uB9C8\uD2F0\uCE74","\uC838\uC2A4\uD14D","\uAE08\uD638\uD0C0\uC774\uC5B4"]'
+    $Names = [string[]](ConvertFrom-Json -InputObject $defaultNamesJson)
+}
 
 if ($Names.Count -eq 0) {
     throw "Names must contain at least one symbol name."
