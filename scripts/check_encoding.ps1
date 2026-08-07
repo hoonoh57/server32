@@ -2,42 +2,64 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
 $extensions = @('.vb', '.vbproj', '.sln', '.config', '.xml', '.json', '.md', '.ps1', '.bat')
 $failures = New-Object System.Collections.Generic.List[string]
 
 $files = Get-ChildItem -LiteralPath $repoRoot -Recurse -File | Where-Object {
-  $_.FullName -notmatch '[\\/](\.git|bin|obj|packages|lib)[\\/]' -and
-  ($extensions -contains $_.Extension.ToLowerInvariant())
+    $_.FullName -notmatch '[\\/](\.git|bin|obj|packages|lib)[\\/]' -and
+    ($extensions -contains $_.Extension.ToLowerInvariant())
 }
 
 foreach ($file in $files) {
-  $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
-  $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
-  $offset = if ($hasBom) { 3 } else { 0 }
+    $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+    $hasUtf8Bom =
+        $bytes.Length -ge 3 -and
+        $bytes[0] -eq 0xEF -and
+        $bytes[1] -eq 0xBB -and
+        $bytes[2] -eq 0xBF
+    $offset = if ($hasUtf8Bom) { 3 } else { 0 }
 
-  try {
-    $text = $strictUtf8.GetString($bytes, $offset, $bytes.Length - $offset)
-  }
-  catch {
-    $failures.Add("Invalid UTF-8: $($file.FullName)")
-    continue
-  }
+    try {
+        $text = $strictUtf8.GetString($bytes, $offset, $bytes.Length - $offset)
+    }
+    catch {
+        $failures.Add("Invalid UTF-8: $($file.FullName)")
+        continue
+    }
 
-  if ($text.IndexOf([char]0xFFFD) -ge 0 -or $text -match '[\u0080-\u009F]') {
-    $failures.Add("Suspicious replacement/control character: $($file.FullName)")
-  }
+    if ($text.IndexOf([char]0xFFFD) -ge 0 -or $text -match '[\u0080-\u009F]') {
+        $failures.Add("Suspicious replacement/control character: $($file.FullName)")
+    }
 
-  if ($text -match '[\u00C0-\u00FF].*[\u00C0-\u00FF]') {
-    $failures.Add("Possible byte-expanded mojibake: $($file.FullName)")
-  }
+    if ($text -match '[\u00C0-\u00FF].*[\u00C0-\u00FF]') {
+        $failures.Add("Possible byte-expanded mojibake: $($file.FullName)")
+    }
+
+    if ($file.Extension.Equals('.ps1', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $containsNonAscii = $false
+        for ($index = $offset; $index -lt $bytes.Length; $index++) {
+            if ($bytes[$index] -ge 0x80) {
+                $containsNonAscii = $true
+                break
+            }
+        }
+
+        if ($containsNonAscii -and -not $hasUtf8Bom) {
+            $failures.Add(
+                "Windows PowerShell 5.1 unsafe encoding: non-ASCII .ps1 without UTF-8 BOM: $($file.FullName)"
+            )
+        }
+    }
 }
 
 if ($failures.Count -gt 0) {
-  $failures | ForEach-Object { Write-Error $_ }
-  throw 'Encoding verification failed. Fix the reported source text; do not blindly re-encode mojibake.'
+    $failures | ForEach-Object { Write-Error $_ }
+    throw 'Encoding verification failed. Fix the reported source text; do not blindly re-encode mojibake.'
 }
 
 Write-Host "Encoding verification passed: $($files.Count) UTF-8 text files."
-
+Write-Host "PowerShell compatibility passed: every non-ASCII .ps1 has a UTF-8 BOM."
